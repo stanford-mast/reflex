@@ -1,0 +1,15 @@
+[global]
+rw=randread
+blocksize=${BLKSIZE}
+blockalign=${BLKSIZE}
+size=1G
+ioengine=libaio
+iodepth=${DEPTH}
+direct=1
+invalidate=1
+time_based
+runtime=20s
+numjobs=12
+group_reporting
+[job0]
+filename=/mnt/reflex/fio

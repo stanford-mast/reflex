@@ -1,0 +1,98 @@
+# sample.devmodel
+# Sample configuration file for Flash device
+# This file defines the request cost model for the Flash device used by ReFlex
+
+###############################################################################
+# Request Costs
+###############################################################################
+# ReFlex uses tokens as an I/O currency. We set a cost for a 4KB read request
+# and determine the cost of other request types (i.e., write requests) 
+# and other request sizes relative to the cost of a 4KB read. 
+#
+# Note: Default 4KB read cost of 100 tokens (instead of 1 token) is recommended 
+# 		for more accurate tracking of fractions of tokens during scheduling. 
+
+read_cost_4KB=100		# keep this default and adjust write cost in relation
+write_cost_4KB=1000     # see Step 2 below for instructions on how to set
+
+###############################################################################
+# Instructions for deriving request cost model:
+###############################################################################
+# Profile the device by running local Flash tests for different rd/wr ratios
+# and request sizes and curve fit to find relative request costs. More details:
+#
+# You can use the SPDK example perf application to run local Flash tests. 
+# Step 1: Run 4KB read-only test. Sweep IOPS and measure tail read latency. 
+#         Plot tail read latency vs. IOPS. 
+#
+# Step 2: Run 4KB rd-wr tests with different rd/wr ratios. Plot tail read
+#         latency vs. RdIOPS + WrIOPS. Find a weight_factor that when applied
+#         to write IOs makes the latency-IOPS curves of different rd/wr ratios
+#         overlap. In other words, plot tail read latency vs. weighted IOPS, 
+#         where weighted IOPS = RdIOPS + (weight_factor)(WrIOPS), and choose 
+#         weight_factor to make the curves for diff rd/wr ratios overlap. 
+#         This weight_factor represents the relative cost of a write IO. 
+#         Set write_cost4B = read_cost_4KB * weight_factor
+#
+# Step 3: Run tests for different request sizes. Plot tail read latency vs. 
+# 		  IOPS. Find a weight_factor that when applied to the non-4KB IOs
+# 		  makes the latency-throughput curve overlap with the 4KB curve.
+# 		  This weight_factor represents the relative cost for that IO size.   
+#
+# In our experience, request cost tends to scale linearly with request size 
+# for most devices. However, write vs. read cost is device specific.
+# Currently, we have only used ReFlex for 1KB and 4KB requests (which have
+# the same request cost on the SSD we used).
+
+
+###############################################################################
+# Latency vs. Weighted IOPS curve (tokens/second limit for each latency SLO)
+###############################################################################
+# The request cost model, derived using instructions above, is a graph of 
+# tail read latency vs. weighted IOPS (measured in a currency of tokens/second).
+#
+# The request cost model tells you for each tail read latency service level 
+# objective (SLO) the corresponding token rate limit. Enter the p95_latency_limit
+# and corresponding max_token_rate information in the config below for all latency
+# SLOs you care about. Below is an example. Add, delete, and/or modify the entries.
+# 
+# If your device has significantly different behaviour for read-only workloads
+# compared to all other rd/wr mixed workloads, you can specify a token limit 
+# to be used specifically when the total device load is read-only. 
+# Use the parameter max_rdonly_token_rate for this.  
+
+max_token_rate=100000000   # max token rate supported by device (no latency SLO)
+
+token_limits=(
+  {
+	p95_latency_limit 		 : 500 		#in us
+	max_token_rate 	  		 : 36000000	#in tokens
+    max_rdonly_token_rate 	 : 85000000	#in tokens
+  },
+  {
+	p95_latency_limit 		 : 1000 	#in us
+    max_token_rate 	  		 : 50000000	#in tokens
+    max_rdonly_token_rate 	 : 95000000	#in tokens
+  },
+  {
+	p95_latency_limit 		 : 1500 	#in us
+    max_token_rate 	  		 : 52000000	#in tokens
+	max_rdonly_token_rate	 : 98000000 #in tokens
+  },
+  {
+	p95_latency_limit 		: 2000 		#in us
+    max_token_rate 	  		: 57000000	#in tokens
+    max_rdonly_token_rate	: 100000000	#in tokens
+  },
+  {
+	p95_latency_limit 		 : 2500 	#in us
+    max_token_rate 	  		 : 75000000	#in tokens
+	max_rdonly_token_rate	 : 100000000 #in tokens
+  },
+  {
+	p95_latency_limit 		 : 3000 	#in us
+    max_token_rate 	  		 : 80000000	#in tokens
+	max_rdonly_token_rate	 : 100000000 #in tokens
+  }
+)
+

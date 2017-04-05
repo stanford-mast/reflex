@@ -1,0 +1,17 @@
+*~
+*.a
+*.d
+*.o
+*.swp
+.depend
+
+/deps/dpdk
+/deps/spdk
+/deps/dune
+/deps/pcidma
+/ix.conf
+/dp/ix
+/apps/echoclient
+/apps/echoserver
+/apps/reflex_server
+/apps/reflex_ix_client

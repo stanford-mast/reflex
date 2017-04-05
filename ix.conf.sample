@@ -1,0 +1,113 @@
+# ix.conf
+# configuration file for IX
+#
+# This file defines the configuration for IX data center OS. You should
+# carefully update all fields in accordence with your local configuration
+# before running IX for the first time.
+
+###############################################################################
+# Network Parameters
+###############################################################################
+
+## host_addr : CIDR IP address and netmask that will be assigned to
+##      the adapter once it comes up.
+host_addr="192.168.40.1/16"
+
+# gateway_addr : default gateway IP address
+gateway_addr="192.168.1.1"
+
+## port : port(s) that will be bound to the application by the
+##      kernel when launching IX.
+##      You can specify multiple entries, e.g. 'port=[X, Y, Z]'
+port=1234
+
+###############################################################################
+# Hardware parameters
+###############################################################################
+
+## devices : Specifies the PCI device ID of the adapter to bind IX with.
+##      Should be an Intel compatible NIC (e.g. 82599, X520, X540, etc)..
+##      See the Docs to see which adapters are currently supported.
+##      Format is a list dddd:bb:ss.ff,... d - domain, b = bus,
+##      s = slot, f = function. Usually, `lspci | grep Ethernet` allows to see
+##      available Ethernet controllers. Similarly, `lspci | grep Non-Volatile` 
+##	    allows to see available NVMe SSD controllers. 
+##      You can specify multiple entries, e.g. 'devices=["X","Y","Z"]'
+devices="0:05:00.0"
+nvme_devices="0:04:00.0"
+
+###############################################################################
+# ReFlex I/O scheduler parameters
+###############################################################################
+# nvme_device_model: "sample.devmodel" is a sample config file for a device model
+# 					     which specifies read/write costs and token limits for 
+# 					     tail latency SLOs; values are device-specific
+# 					     You should follow instructions in this file to modify 
+# 					     values corresponding to the performance of your SSD.
+# 					     Either modify sample.devmodel directly or copy to a 
+# 					     different file and specify file name here.
+# 					 "default" for no token limits
+# 					 "fake" models ultra low latency device since we don't
+# 					     submit I/Os to real device, just generate fake I/O 
+# 					     completion events (can be useful for perf debugging)
+#
+# scheduler: 		 "on" (by default) 
+# 					 "off" means I/O submitted directly to flash, 
+# 					     no SW queueing, no QoS scheduling 			 
+nvme_device_model="sample.devmodel" 
+scheduler="on"
+
+## cpu : Indicates which CPU process unit(s) (P) this IX instance
+##      should be bound to.
+##      WARNING: If this setting defines multiple nodes, make sure they ar
+##      part of the same NUMA socket. On most architectures, the IDs of
+##      processing units on the same socket are interleaved.
+##      Usually `lstopo` allows to see NUMA nodes topology
+##      You can specify multiple entries, e.g. 'nodes=["X","Y","Z"]'
+cpu=0
+
+## batch : Specifies maximum batch size of received packets to process.
+##      Default: 64.
+batch=64
+
+## loader_path : kernel loader to use with IX module:
+##
+loader_path="/lib64/ld-linux-x86-64.so.2"
+
+###############################################################################
+# Optional parameters
+###############################################################################
+
+## arp: Allows you to manually add static arp entries in the interface arp table
+#
+#arp=(
+#  {
+#    ip : "192.168.1.2"
+#    mac : "aa:aa:aa:aa:aa:aa"
+#  },
+#  {
+#    ip : "192.168.1.3"
+#    mac : "bb:bb:bb:bb:bb:bb"
+#  }
+#)
+
+
+## fdir : Static flow director rules to be added to NIC
+#		  Use this to steer traffic to particular cores when multi-core ReFlex.
+#         Queue number corresponds to CPU core id
+#
+##fdir=(
+#  {
+#	dst_ip : "192.168.40.1"
+#    src_ip : "XX.XX.XX.XX"
+#    dst_port : 1234
+#    queue : 0
+#  },
+#  {
+#	dst_ip : "192.168.40.1"
+#    src_ip : "YY.YY.YY.YY"
+#    dst_port : 5678
+#    queue : 1
+#  }
+#)
+
