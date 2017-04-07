@@ -22,7 +22,13 @@ There is currently no binary distribution of ReFlex. You will therefore need  to
    ./deps/fetch-deps.sh
    ```
 
-2. Build the dependecies:
+2. Install library dependencies: 
+
+   ```
+   sudo apt-get install libconfig-dev libnuma-dev libpciaccess-dev libaio-dev
+   ```
+
+3. Build the dependecies:
 
    ```
    sudo chmod +r /boot/System.map-`uname -r`
@@ -33,12 +39,6 @@ There is currently no binary distribution of ReFlex. You will therefore need  to
    make -sj64 -C deps/spdk config.h
    make -sj64 -C deps/spdk/lib/nvme/ CONFIG_NVME_IMPL="../../../../inc/ix/spdk.h -I ../../../dpdk/build/include/ -I ../../../../inc/ -D__KERNEL__"
    make -sj64 -C deps/spdk/lib/util/ CONFIG_NVME_IMPL="../../../../inc/ix/spdk.h -I ../../../../inc/ -D__KERNEL__"
-   ```
-
-3. Install library dependencies: 
-
-   ```
-   sudo apt-get install libconfig-dev libnuma-dev libpciaccess-dev libaio-dev
    ```
 
 4. Build ReFlex:
@@ -230,7 +230,11 @@ There are several options for clients:
     ```
 ## Reference
 
-Please refer to the ReFlex [paper](https://web.stanford.edu/group/mast/cgi-bin/drupal/system/files/reflex_asplos17.pdf) published at the 22nd ACM International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS 2017). 
+Please refer to the ReFlex [paper](https://web.stanford.edu/group/mast/cgi-bin/drupal/system/files/reflex_asplos17.pdf):
+
+Ana Klimovic, Heiner Litz, Christos Kozyrakis
+ReFlex: Remote Flash == Local Flash
+in the 22nd International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS'22), 2017
 
 ## License and Copyright
 
