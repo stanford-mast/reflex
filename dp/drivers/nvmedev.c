@@ -320,7 +320,7 @@ int init_nvmedev(void)
 
 	g_nvme_dev = dev;
 
-	if (spdk_nvme_probe(NULL, probe_cb, attach_cb) != 0) {
+	if (spdk_nvme_probe(NULL, probe_cb, attach_cb, NULL) != 0) {
 		log_info("spdk_nvme_probe() failed\n");
 		return 1;
 	}
@@ -402,7 +402,6 @@ static const struct nvme_string command_specific_status[] = {
 	{ SPDK_NVME_SC_INVALID_INTERRUPT_VECTOR, "INVALID INTERRUPT VECTOR" },
 	{ SPDK_NVME_SC_INVALID_LOG_PAGE, "INVALID LOG PAGE" },
 	{ SPDK_NVME_SC_INVALID_FORMAT, "INVALID FORMAT" },
-	{ SPDK_NVME_SC_FIRMWARE_REQUIRES_RESET, "FIRMWARE REQUIRES RESET" },
 	{ SPDK_NVME_SC_CONFLICTING_ATTRIBUTES, "CONFLICTING ATTRIBUTES" },
 	{ SPDK_NVME_SC_INVALID_PROTECTION_INFO, "INVALID PROTECTION INFO" },
 	{ SPDK_NVME_SC_ATTEMPTED_WRITE_TO_RO_PAGE, "WRITE TO RO PAGE" },

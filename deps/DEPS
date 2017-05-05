@@ -18,4 +18,4 @@ https://github.com/ix-project/pcidma.git pcidma 3a411ad4810a1c8ee7954ad35229dfa9
 # Three lines of non-changing
 # comments so that git can
 # automatically merge this file.
-https://github.com/spdk/spdk.git spdk 7fea41512cc649c273734978acde6806815ceac8
+https://github.com/spdk/spdk.git spdk d7120a3ee88062e06049e195131c703522e1dfda
