@@ -42,6 +42,7 @@
 #include <ix/atomic.h>
 
 #include <spdk/nvme.h>
+#include <spdk/nvme_spec.h>
 #include <limits.h>
 
 
@@ -53,6 +54,8 @@ struct pci_dev *g_nvme_dev;
 
 #define MAX_OPEN_BATCH 32 
 #define NUM_NVME_REQUESTS (4096 * 256) 
+#define SGL_PAGE_SIZE 4096 	//should match PAGE_SIZE defined in apps/reflex_server.c
+
 DEFINE_PERCPU(int, open_ev[MAX_OPEN_BATCH]);
 DEFINE_PERCPU(int, open_ev_ptr);
 DEFINE_PERCPU(struct spdk_nvme_qpair *, qpair);
@@ -364,51 +367,135 @@ int allocate_nvme_ioq(void)
 	return q;
 }
 
+struct nvme_string {
+	uint16_t	value;
+	const char 	*str;
+};
+static const struct nvme_string generic_status[] = {
+	{ SPDK_NVME_SC_SUCCESS, "SUCCESS" },
+	{ SPDK_NVME_SC_INVALID_OPCODE, "INVALID OPCODE" },
+	{ SPDK_NVME_SC_INVALID_FIELD, "INVALID_FIELD" },
+	{ SPDK_NVME_SC_COMMAND_ID_CONFLICT, "COMMAND ID CONFLICT" },
+	{ SPDK_NVME_SC_DATA_TRANSFER_ERROR, "DATA TRANSFER ERROR" },
+	{ SPDK_NVME_SC_ABORTED_POWER_LOSS, "ABORTED - POWER LOSS" },
+	{ SPDK_NVME_SC_INTERNAL_DEVICE_ERROR, "INTERNAL DEVICE ERROR" },
+	{ SPDK_NVME_SC_ABORTED_BY_REQUEST, "ABORTED - BY REQUEST" },
+	{ SPDK_NVME_SC_ABORTED_SQ_DELETION, "ABORTED - SQ DELETION" },
+	{ SPDK_NVME_SC_ABORTED_FAILED_FUSED, "ABORTED - FAILED FUSED" },
+	{ SPDK_NVME_SC_ABORTED_MISSING_FUSED, "ABORTED - MISSING FUSED" },
+	{ SPDK_NVME_SC_INVALID_NAMESPACE_OR_FORMAT, "INVALID NAMESPACE OR FORMAT" },
+	{ SPDK_NVME_SC_COMMAND_SEQUENCE_ERROR, "COMMAND SEQUENCE ERROR" },
+	{ SPDK_NVME_SC_LBA_OUT_OF_RANGE, "LBA OUT OF RANGE" },
+	{ SPDK_NVME_SC_CAPACITY_EXCEEDED, "CAPACITY EXCEEDED" },
+	{ SPDK_NVME_SC_NAMESPACE_NOT_READY, "NAMESPACE NOT READY" },
+	{ 0xFFFF, "GENERIC" }
+};
+
+static const struct nvme_string command_specific_status[] = {
+	{ SPDK_NVME_SC_COMPLETION_QUEUE_INVALID, "INVALID COMPLETION QUEUE" },
+	{ SPDK_NVME_SC_INVALID_QUEUE_IDENTIFIER, "INVALID QUEUE IDENTIFIER" },
+	{ SPDK_NVME_SC_MAXIMUM_QUEUE_SIZE_EXCEEDED, "MAX QUEUE SIZE EXCEEDED" },
+	{ SPDK_NVME_SC_ABORT_COMMAND_LIMIT_EXCEEDED, "ABORT CMD LIMIT EXCEEDED" },
+	{ SPDK_NVME_SC_ASYNC_EVENT_REQUEST_LIMIT_EXCEEDED, "ASYNC LIMIT EXCEEDED" },
+	{ SPDK_NVME_SC_INVALID_FIRMWARE_SLOT, "INVALID FIRMWARE SLOT" },
+	{ SPDK_NVME_SC_INVALID_FIRMWARE_IMAGE, "INVALID FIRMWARE IMAGE" },
+	{ SPDK_NVME_SC_INVALID_INTERRUPT_VECTOR, "INVALID INTERRUPT VECTOR" },
+	{ SPDK_NVME_SC_INVALID_LOG_PAGE, "INVALID LOG PAGE" },
+	{ SPDK_NVME_SC_INVALID_FORMAT, "INVALID FORMAT" },
+	{ SPDK_NVME_SC_FIRMWARE_REQUIRES_RESET, "FIRMWARE REQUIRES RESET" },
+	{ SPDK_NVME_SC_CONFLICTING_ATTRIBUTES, "CONFLICTING ATTRIBUTES" },
+	{ SPDK_NVME_SC_INVALID_PROTECTION_INFO, "INVALID PROTECTION INFO" },
+	{ SPDK_NVME_SC_ATTEMPTED_WRITE_TO_RO_PAGE, "WRITE TO RO PAGE" },
+	{ 0xFFFF, "COMMAND SPECIFIC" }
+};
+
+static const struct nvme_string media_error_status[] = {
+	{ SPDK_NVME_SC_WRITE_FAULTS, "WRITE FAULTS" },
+	{ SPDK_NVME_SC_UNRECOVERED_READ_ERROR, "UNRECOVERED READ ERROR" },
+	{ SPDK_NVME_SC_GUARD_CHECK_ERROR, "GUARD CHECK ERROR" },
+	{ SPDK_NVME_SC_APPLICATION_TAG_CHECK_ERROR, "APPLICATION TAG CHECK ERROR" },
+	{ SPDK_NVME_SC_REFERENCE_TAG_CHECK_ERROR, "REFERENCE TAG CHECK ERROR" },
+	{ SPDK_NVME_SC_COMPARE_FAILURE, "COMPARE FAILURE" },
+	{ SPDK_NVME_SC_ACCESS_DENIED, "ACCESS DENIED" },
+	{ 0xFFFF, "MEDIA ERROR" }
+};
+
+
+static const char *
+nvme_get_string(const struct nvme_string *strings, uint16_t value)
+{
+	const struct nvme_string *entry;
+
+	entry = strings;
+
+	while (entry->value != 0xFFFF) {
+		if (entry->value == value) {
+			return entry->str;
+		}
+		entry++;
+	}
+	return entry->str;
+}
+
+static const char *
+get_status_string(uint16_t sct, uint16_t sc)
+{
+	const struct nvme_string *entry;
+
+	switch (sct) {
+	case SPDK_NVME_SCT_GENERIC:
+		entry = generic_status;
+		break;
+	case SPDK_NVME_SCT_COMMAND_SPECIFIC:
+		entry = command_specific_status;
+		break;
+	case SPDK_NVME_SCT_MEDIA_ERROR:
+		entry = media_error_status;
+		break;
+	case SPDK_NVME_SCT_VENDOR_SPECIFIC:
+		return "VENDOR SPECIFIC";
+	default:
+		return "RESERVED";
+	}
+
+	return nvme_get_string(entry, sc);
+}
 
 
 
 void
-nvme_write_cb(void *ctx, const struct spdk_nvme_cpl *completion)
+nvme_write_cb(void *ctx, const struct spdk_nvme_cpl *cpl)
 {
 	struct nvme_ctx *n_ctx = (struct nvme_ctx *) ctx;
 
-	if (spdk_nvme_cpl_is_error(completion))
+	if (spdk_nvme_cpl_is_error(cpl)){
 		log_info("SPDK Write Failed!\n");
-	
-	usys_nvme_written(n_ctx->cookie, RET_OK);
-	/*
-	if (spdk_nvme_cpl_is_error(completion)) {
-		log_info("ERROR: nvme_write completion status error: %x\n", completion->status.sc);
-		usys_nvme_written(n_ctx->cookie, -RET_FAULT);
-		percpu_get(received_nvme_completions)++;
+		log_info("%s (%02x/%02x) sqid:%d cid:%d cdw0:%x sqhd:%04x p:%x m:%x dnr:%x\n",
+		       get_status_string(cpl->status.sct, cpl->status.sc),
+		       cpl->status.sct, cpl->status.sc, cpl->sqid, cpl->cid, cpl->cdw0,
+		       cpl->sqhd, cpl->status.p, cpl->status.m, cpl->status.dnr);
 	}
-	else {
-		usys_nvme_written(n_ctx->cookie, RET_OK);
-		percpu_get(received_nvme_completions)++;
-		}*/
+
+	usys_nvme_written(n_ctx->cookie, RET_OK);
+	
 	free_local_nvme_ctx(n_ctx);
 }
 
 void
-nvme_read_cb(void *ctx, const struct spdk_nvme_cpl *completion)
+nvme_read_cb(void *ctx, const struct spdk_nvme_cpl *cpl)
 {
 	struct nvme_ctx *n_ctx = (struct nvme_ctx *) ctx;
 
-	if (spdk_nvme_cpl_is_error(completion))
+	if (spdk_nvme_cpl_is_error(cpl)){
 		log_info("SPDK Read Failed!\n");
-
+		log_info("%s (%02x/%02x) sqid:%d cid:%d cdw0:%x sqhd:%04x p:%x m:%x dnr:%x\n",
+		       get_status_string(cpl->status.sct, cpl->status.sc),
+		       cpl->status.sct, cpl->status.sc, cpl->sqid, cpl->cid, cpl->cdw0,
+		       cpl->sqhd, cpl->status.p, cpl->status.m, cpl->status.dnr);
+	}
 	
 	usys_nvme_response(n_ctx->cookie, n_ctx->user_buf.buf, RET_OK);
-	/*
-	if (nvme_completion_is_error(completion)) {
-		log_info("ERROR: nvme_write completion status error\n");
-		usys_nvme_response(n_ctx->cookie, n_ctx->buf, -RET_FAULT);
-		percpu_get(received_nvme_completions)++;
-	}
-	else {
-		usys_nvme_response(n_ctx->cookie, n_ctx->buf, RET_OK);
-		percpu_get(received_nvme_completions)++;
-	}*/
+	
 	free_local_nvme_ctx(n_ctx);
 }
 
@@ -967,8 +1054,8 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 static void sgl_reset_cb(void *cb_arg, uint32_t sgl_offset)
 {
 	struct nvme_ctx *ctx = (struct nvme_ctx *)cb_arg;
-	
-	ctx->user_buf.sgl_buf.current_sgl = sgl_offset;
+
+	ctx->user_buf.sgl_buf.current_sgl = sgl_offset / SGL_PAGE_SIZE;
 }
 
 static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
@@ -987,7 +1074,7 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 		temp = ctx->user_buf.sgl_buf.sgl[ctx->user_buf.sgl_buf.current_sgl++];
 		paddr = (void *) vm_lookup_phys(temp, PGSIZE_2MB);
 		if (unlikely(!paddr)) {
-			log_info("bsys_nvme_read: no paddr for requested buf!");
+			log_info("no paddr for requested buf!\n");
 			return -RET_FAULT;
 		}
 		//virt to phys

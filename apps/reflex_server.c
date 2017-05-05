@@ -73,7 +73,7 @@
 
 #define NVME_ENABLE
 
-#define MAX_PAGES_PER_ACCESS 64
+#define MAX_PAGES_PER_ACCESS 256 //64
 #define PAGE_SIZE 4096
 
 static int outstanding_reqs = 4096 * 64;
@@ -352,6 +352,7 @@ static void receive_req(struct pp_conn *conn)
 			
 			assert(header->magic == sizeof(BINARY_HEADER));
 			num4k = (header->lba_count * ns_sector_size) / 4096;
+			assert(num4k <= MAX_PAGES_PER_ACCESS);
 			if (((header->lba_count * ns_sector_size) % 4096) != 0)
 				num4k++;
 			for (i = 0; i < num4k; i++) {
@@ -396,8 +397,9 @@ static void receive_req(struct pp_conn *conn)
 				}
 
 				conn->rx_received += ret;
-				if ((conn->rx_received % PAGE_SIZE) == 0)
+				if ((conn->rx_received % PAGE_SIZE) == 0){
 					req->current_sgl_buf++;
+				}
 			}
 			//4KB sgl bufs should match number of 512B sectors
 			assert(req->current_sgl_buf <= header->lba_count * 8);
