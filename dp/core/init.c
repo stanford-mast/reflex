@@ -198,37 +198,16 @@ static int init_ethdev(void)
 	// Allocate 1 RX and 1 TX queue per CPU core
 	uint16_t nb_rx_q = CFG.num_cpus; 
 	uint16_t nb_tx_q = CFG.num_cpus;
-	//struct rte_eth_conf conf;
-	struct rte_eth_conf *dev_conf; // = &conf;
+	struct rte_eth_conf *dev_conf; 
 
-	//FIXME: figure out device config for fdir....
-	//memset(dev_conf, 0, sizeof(struct rte_eth_conf));
-	
-	//(void)(memcpy(dev_conf, &default_eth_conf, sizeof(default_eth_conf)));
-	//memcpy(&conf.rxmode, &default_eth_conf.rxmode, sizeof(default_eth_conf.rxmode));
-	//memcpy(&conf.txmode, &default_eth_conf.txmode, sizeof(default_eth_conf.txmode));
-	//memcpy(&conf.fdir_conf, &default_eth_conf.fdir_conf, sizeof(default_eth_conf.fdir_conf));
-	//memcpy(&conf.rx_adv_conf, &default_eth_conf.rx_adv_conf, sizeof(default_eth_conf.rx_adv_conf));
-/*	
-	dev_conf->rxmode.max_rx_pkt_len = 9000; 
-	dev_conf->rxmode.split_hdr_size = 0;
-	dev_conf->rxmode.header_split   = 0; 
-	dev_conf->rxmode.hw_ip_checksum = 1; 
-	dev_conf->rxmode.hw_vlan_filter = 0; 
-	dev_conf->rxmode.jumbo_frame    = 1; 
-	dev_conf->rxmode.hw_strip_crc   = 1; 
-	dev_conf->rxmode.mq_mode        = ETH_MQ_RX_RSS,
-	dev_conf->rx_adv_conf.rss_conf.rss_hf = ETH_RSS_NONFRAG_IPV4_TCP | ETH_RSS_NONFRAG_IPV4_UDP;
-	dev_conf->txmode.mq_mode = ETH_MQ_TX_NONE;
-*/	
 	dev_conf = &default_eth_conf;
 
 	uint8_t nb_ports;
 	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; //4096
 	uint16_t nb_rx_desc = ETH_DEV_RX_QUEUE_SZ; //512
 	struct rte_eth_dev_info dev_info;
-	struct rte_eth_txconf txconf = dev_info.default_txconf; //FIXME: ?? should be after dev_info_get?
-	struct rte_eth_rxconf rxconf = dev_info.default_rxconf; //FIXME: ?? shoudl be after dev_info_get?
+	struct rte_eth_txconf* txconf; 
+	struct rte_eth_rxconf* rxconf; 
 
 
 	nb_ports = rte_eth_dev_count();
@@ -238,6 +217,7 @@ static int init_ethdev(void)
 	if (nb_ports > RTE_MAX_ETHPORTS)
 		nb_ports = RTE_MAX_ETHPORTS;
 
+	//FIXME: figure out device config for fdir....
 	dev_conf->fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
 	dev_conf->fdir_conf.pballoc = RTE_FDIR_PBALLOC_256K;
 	dev_conf->fdir_conf.status = RTE_FDIR_REPORT_STATUS;
@@ -256,24 +236,27 @@ static int init_ethdev(void)
 	dev_conf->fdir_conf.flex_conf.nb_flexmasks = 0;
 
 	for (port_id = 0; port_id < nb_ports; port_id++) {		
-		rte_eth_dev_info_get(port_id, &dev_info);
-		//txconf = &dev_info.default_txconf;  //FIXME: this should go here but causes TCP rx bug
-		//rxconf = &dev_info.default_rxconf;
 		ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, dev_conf);
 		if (ret < 0) {
 			rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
 						 ret, (unsigned) port_id);
 		}
 
+		rte_eth_dev_info_get(port_id, &dev_info);
+		txconf = &dev_info.default_txconf;  //FIXME: this should go here but causes TCP rx bug
+		rxconf = &dev_info.default_rxconf;
+		if (dev_conf->rxmode.jumbo_frame)
+				txconf->txq_flags = 0;
 	
 		// initialize one queue per cpu
 		for (i = 0; i < CFG.num_cpus; i++) {
-			ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), &txconf);
+			log_info("setting up TX and RX queues...\n");
+			ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), txconf);
 			if (ret < 0) {
 				rte_exit(EXIT_FAILURE, "rte_eth_tx_queue_setup:err=%d, port=%u\n",
 						 ret, (unsigned) port_id);
 			}
-			rte_eth_rx_queue_setup(port_id, i, nb_rx_desc, rte_eth_dev_socket_id(port_id), &rxconf, dpdk_pool);
+			rte_eth_rx_queue_setup(port_id, i, nb_rx_desc, rte_eth_dev_socket_id(port_id), rxconf, dpdk_pool);
 			if (ret <0 ) {
 				rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
 						 ret, (unsigned) port_id);
