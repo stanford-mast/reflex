@@ -58,19 +58,23 @@
  * TODO: add support for mapping into user-level address space...
  */
 
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_per_lcore.h>
+#include <rte_eal.h>
+#include <rte_mempool.h>
+#include <rte_mbuf.h>
 #include <ix/stddef.h>
-#include <ix/mem.h>
 #include <ix/mempool.h>
 #include <ix/mbuf.h>
 #include <ix/cpu.h>
 
 /* Capacity should be at least RX queues per CPU * ETH_DEV_RX_QUEUE_SZ */
-#define MBUF_CAPACITY	20480 /* Originally set to (768*1024), but decrease # of mbufs allocated
-								and use memory to create larger mbufs for jumbo frames */
+#define MBUF_CAPACITY	20480 /* Originally set to (768*1024), but decrease # of mbufs allocated and use memory to create larger mbufs for jumbo frames */
 
 static struct mempool_datastore mbuf_datastore;
 
-DEFINE_PERCPU(struct mempool, mbuf_mempool __attribute__((aligned(64))));
+RTE_DEFINE_PER_LCORE(struct mempool, mbuf_mempool __attribute__((aligned(64))));
 
 void mbuf_default_done(struct mbuf *m)
 {
@@ -97,19 +101,19 @@ int mbuf_init(void)
 {
 	int ret;
 	struct mempool_datastore *m = &mbuf_datastore;
-	BUILD_ASSERT(sizeof(struct mbuf) <= MBUF_HEADER_LEN);
-
-	ret = mempool_create_datastore(m, MBUF_CAPACITY, MBUF_LEN, 1, MEMPOOL_DEFAULT_CHUNKSIZE, "mbuf");
+	ret = mempool_create_mbuf_datastore(m, MBUF_CAPACITY, DPDK_MBUF_SIZE, "mbuf");
 	if (ret) {
 		assert(0);
 		return ret;
 	}
-	ret = mempool_pagemem_map_to_user(m);
+	//ret = mempool_pagemem_map_to_user(m);
 	if (ret) {
 		assert(0);
-		mempool_pagemem_destroy(m);
+		//mempool_pagemem_destroy(m);
+		mempool_destroy_datastore(m);
 		return ret;
 	}
+	
 	return 0;
 }
 
@@ -118,6 +122,6 @@ int mbuf_init(void)
  */
 void mbuf_exit_cpu(void)
 {
-	mempool_pagemem_destroy(&mbuf_datastore);
+	mempool_destroy_datastore(&mbuf_datastore);
 }
 

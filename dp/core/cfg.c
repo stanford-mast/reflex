@@ -106,6 +106,12 @@ static int parse_scheduler_mode(void);
 
 extern int ixgbe_fdir_add_rule(uint32_t dst_addr, uint32_t src_addr, uint16_t dst_port, int queue_id);
 
+
+#define IPv4(a,b,c,d)	((uint32_t)(((a) & 0xff) << 24) | \
+                                           (((b) & 0xff) << 16) | \
+                                           (((c) & 0xff) << 8)  | \
+                                           ((d) & 0xff))
+
 struct config_vector_t {
 	const char *name;
 	int (*f)(void);
@@ -163,16 +169,50 @@ static int str_to_ip_addr(const char *src, unsigned char *dst)
 	return 0;
 }
 
+
+//FIXME: FDIR setting not working for userspace version of ReFlex -- need to debug 
+//       this functionality is required for multi-core ReFlex deployment
 int parse_fdir(void)
 {
 	const config_setting_t *fdir = NULL, *entry = NULL;
 	int i, ret;
+
+	struct rte_eth_fdir_filter filter;
+	struct rte_fdir_filter dir_filter;
+
+	memset(&filter, 0, sizeof(struct rte_eth_fdir_filter));
 
 	fdir = config_lookup(&cfg, "fdir");
 	if (!fdir) {
 		log_info("no static fdir rules defined in config\n");
 		return 0;
 	}
+	
+	ret = rte_eth_dev_filter_supported(0, RTE_ETH_FILTER_FDIR);
+	if (ret < 0) {
+		log_err("ERROR: hardware does not support flow director.  \
+				Need to figure out alternative for steering traffic to specific \
+				cores in multi-core setup\n");
+	}
+
+/*
+	struct rte_eth_fdir_filter_info filter_info;
+	memset(&filter_info, 0, sizeof(filter_info));
+	filter_info.info_type = RTE_ETH_FDIR_FILTER_INPUT_SET_SELECT;
+	filter_info.info.input_set_conf.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_TCP;
+	filter_info.info.input_set_conf.inset_size = 2;
+	filter_info.info.input_set_conf.field[0]
+				= RTE_ETH_INPUT_SET_L3_DST_IP4;
+	filter_info.info.input_set_conf.field[1]
+				= RTE_ETH_INPUT_SET_L4_TCP_DST_PORT;
+	filter_info.info.input_set_conf.op = RTE_ETH_INPUT_SET_SELECT;
+	ret = rte_eth_dev_filter_ctrl(0, RTE_ETH_FILTER_FDIR,
+			RTE_ETH_FILTER_SET, &filter_info);
+	if (ret != 0) {
+		rte_exit(EXIT_FAILURE, "Could not set fdir info: %s\n",
+				strerror(-ret));
+	}
+*/
 	for (i = 0; i < config_setting_length(fdir); ++i) {
 		const char *dst_ip = NULL, *src_ip = NULL;
 		int dst_port = 0;
@@ -190,14 +230,31 @@ int parse_fdir(void)
 			return -EINVAL;
 		if (str_to_ip_addr(src_ip, (void *)&src_ipaddr))
 			return -EINVAL;
-		ret = ixgbe_fdir_add_rule(dst_ipaddr.addr, src_ipaddr.addr, dst_port, queue_id);
-		if (ret) {
-			log_err("cfg: failed to insert FDIR rule.\n");
+		//ret = ixgbe_fdir_add_rule(dst_ipaddr.addr, src_ipaddr.addr, dst_port, queue_id);
+		
+		filter.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_TCP;
+		filter.input.flow.tcp4_flow.ip.src_ip = hton32(src_ipaddr.addr); 
+		filter.input.flow.tcp4_flow.ip.dst_ip = hton32(dst_ipaddr.addr); // tos, ttl?
+		filter.input.flow.tcp4_flow.src_port = 0; 
+		filter.input.flow.tcp4_flow.dst_port = hton16(dst_port);
+		filter.soft_id = 0;
+		filter.action.rx_queue = queue_id; 
+		filter.action.behavior = RTE_ETH_FDIR_ACCEPT; 
+		filter.action.report_status = RTE_ETH_FDIR_REPORT_ID;
+		
+		ret = rte_eth_dev_filter_ctrl(0, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, &filter);
+		if (ret < 0) {
+			log_err("cfg: failed to add FDIR rule, ret %d.\n", ret);
 			return ret;
 		}
 		log_info("FDIR: dst_ip %s, src_ip %s, dst_port %d --> queue (core) %d\n", 
 				 dst_ip, src_ip, dst_port, queue_id);
 	}
+
+	struct rte_eth_fdir_stats stats;
+	ret = rte_eth_dev_filter_ctrl(0, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_STATS, &stats);
+	printf("FDIR stats: collision %d, free %d, add %d, f_add %d\n", stats.collision, stats.free, stats.add, stats.f_add);
+
 	config_destroy(&cfg); //moved this here
 	return 0;
 }
@@ -385,7 +442,6 @@ static int parse_nvme_devices(void)
 	}
 	return 0;
 }
-
 int compare_lat_tokenrate (const void * a, const void * b)
 {
    struct lat_tokenrate_pair *a_pair = (struct lat_tokenrate_pair*) a;

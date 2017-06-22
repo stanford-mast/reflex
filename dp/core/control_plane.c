@@ -56,6 +56,8 @@
  * control_plane.c - control plane implementation
  */
 
+#include <rte_per_lcore.h>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -67,8 +69,7 @@
 #include <ix/log.h>
 
 volatile struct cp_shmem *cp_shmem;
-
-DEFINE_PERCPU(volatile struct command_struct *, cp_cmd);
+RTE_DEFINE_PER_LCORE(volatile struct command_struct *, cp_cmd);
 
 double energy_unit;
 

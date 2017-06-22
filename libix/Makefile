@@ -21,12 +21,22 @@
 
 # A Makefile for libIX.
 
-INC	= -I. -I../inc
+DPDK	= ../deps/dpdk
+DPDK_INC = -I$(DPDK)/build/include -I$(DPDK)/lib/librte_eal/common -I$(DPDK)/drivers/net/ixgbe
+DPDK_LIBS=
+#DPDK_LIBS+=-Wl,-whole-archive $(DPDK)/build/lib/librte_pmd_ixgbe.a -Wl,-no-whole-archive
+DPDK_LIBS+=$(DPDK)/build/lib/libethdev.a
+DPDK_LIBS+=$(DPDK)/build/lib/librte_mbuf.a
+DPDK_LIBS+=$(DPDK)/build/lib/librte_eal.a
+DPDK_LIBS+=$(DPDK)/build/lib/librte_mempool.a
+DPDK_LIBS+=$(DPDK)/build/lib/librte_ring.a
+
+INC	= -I. -I../inc $(DPDK_INC)
 CC 	= gcc
 CFLAGS	= -g -Wall -O3 $(INC)
 AR	= ar
 
-SRCS	= main.c mem.c mempool.c ixev.c ixev_timer.c
+SRCS	= main.c ixev.c ixev_timer.c
 OBJS	= $(subst .c,.o,$(SRCS))
 
 all: libix.a
@@ -40,7 +50,7 @@ depend: .depend
 -include .depend
 
 libix.a: $(OBJS)
-	$(AR) cru $(@) $(OBJS)
+	$(AR) cru $(@) $(OBJS) #$(DPDK_LIBS)
 
 clean:
 	rm -f $(OBJS) libix.a .depend

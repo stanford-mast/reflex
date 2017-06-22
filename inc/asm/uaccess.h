@@ -136,6 +136,7 @@ static inline bool uaccess_check_fault(void)
  *
  * Returns 0 if successful, otherwise -EFAULT if there was a bad address.
  */
+/*
 static inline int uaccess_copy_user(const char *src, char *dst, int len)
 {
 	int ret;
@@ -154,4 +155,4 @@ static inline int uaccess_copy_user(const char *src, char *dst, int len)
 
 	return ret;
 }
-
+*/

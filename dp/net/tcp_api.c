@@ -56,27 +56,29 @@
  * tcp_api.c - plumbing between the TCP and userspace
  */
 
+#include <sys/socket.h>
+#include <rte_per_lcore.h>
+
 #include <assert.h>
 #include <ix/stddef.h>
 #include <ix/errno.h>
 #include <ix/syscall.h>
 #include <ix/log.h>
-#include <ix/uaccess.h>
 #include <ix/ethdev.h>
 #include <ix/kstats.h>
 #include <ix/cfg.h>
 
 #include <lwip/tcp.h>
 
-int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct mbuf *pkt, size_t len);
+int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct rte_mbuf *pkt, size_t len);
 
 #define MAX_PCBS	(512*1024)
 #define DEFAULT_PORT 8000
 
 /* FIXME: this should be probably per queue */
-static DEFINE_PERCPU(struct tcp_pcb_listen[CFG_MAX_PORTS], listen_ports);
+static RTE_DEFINE_PER_LCORE(struct tcp_pcb_listen[CFG_MAX_PORTS], listen_ports);
 
-static DEFINE_PERCPU(uint16_t, local_port);
+static RTE_DEFINE_PER_LCORE(uint16_t, local_port);
 /* FIXME: this should be more adaptive to various configurations */
 #define PORTS_PER_CPU (65536 / 32)
 
@@ -102,8 +104,10 @@ struct tcpapi_pcb {
 static struct mempool_datastore pcb_datastore;
 static struct mempool_datastore id_datastore;
 
-static DEFINE_PERCPU(struct mempool, pcb_mempool __attribute__((aligned(64))));
-static DEFINE_PERCPU(struct mempool, id_mempool __attribute__((aligned(64))));
+static RTE_DEFINE_PER_LCORE(struct mempool, pcb_mempool __attribute__((aligned(64))));
+static RTE_DEFINE_PER_LCORE(struct tcpapi_pcb *, handle2pcb_array[MAX_PCBS]);
+
+static RTE_DEFINE_PER_LCORE(struct mempool, id_mempool __attribute__((aligned(64))));
 
 static void remove_fdir_filter(struct ip_tuple *id);
 
@@ -129,12 +133,15 @@ static inline struct tcpapi_pcb *handle_to_tcpapi(hid_t handle, struct eth_fg **
 	eth_fg_set_current(fgs[fg]);
 	p = &percpu_get(pcb_mempool);
 
-	api = (struct tcpapi_pcb *) mempool_idx_to_ptr(p, idx, TCPAPI_PCB_SIZE);
+	api = (struct tcpapi_pcb *) percpu_get(handle2pcb_array[idx])
+	
+
 	MEMPOOL_SANITY_ACCESS(api);
 
 	/* check if the handle is actually allocated */
-	if (unlikely(api->alive > 1))
-		return NULL;
+	// TODO: Not sure how to do this with mempools
+	//if (unlikely(api->alive > 1))
+	//	return NULL;
 
 	percpu_get(syscall_cookie) = api->cookie;
 
@@ -151,24 +158,39 @@ static inline hid_t tcpapi_to_handle(struct eth_fg *cur_fg, struct tcpapi_pcb *p
 {
 	struct mempool *p = &percpu_get(pcb_mempool);
 	MEMPOOL_SANITY_ACCESS(pcb);
-	hid_t hid = mempool_ptr_to_idx(p, pcb, TCPAPI_PCB_SIZE) | ((uintptr_t)(cur_fg->fg_id) << 48);
+		
+	unsigned int i = 0;
+	for (i = 0; i < MAX_PCBS; i++)
+	{
+		if (percpu_get(handle2pcb_array[i]) == NULL)
+		{	
+			percpu_get(handle2pcb_array[i]) = pcb;
+			break;
+		}
+	}
+	
+	assert(i < MAX_PCBS);
+	hid_t hid = i | ((uintptr_t)(cur_fg->fg_id) << 48);
+
 	return hid;
 }
 
 static void recv_a_pbuf(struct tcpapi_pcb *api, struct pbuf *p)
 {
-	struct mbuf *pkt;
+	struct rte_mbuf *pkt;
 	MEMPOOL_SANITY_LINK(api, p);
 
-	/* Walk through the full receive chain */
+	// Walk through the full receive chain 
 	do {
 		pkt = p->mbuf;
-		pkt->len = p->len; /* repurpose len for recv_done */
-		usys_tcp_recv(api->handle, api->cookie,
-			      mbuf_to_iomap(pkt, p->payload), p->len);
+		pkt->pkt_len = p->len; // repurpose len for recv_done 
+		pkt->data_len = p->len; // repurpose len for recv_done 
+	
+		usys_tcp_recv(api->handle, api->cookie, p->payload, p->len);
 
 		p = p->next;
 	} while (p);
+	
 }
 
 
@@ -229,12 +251,9 @@ long bsys_tcp_accept(hid_t handle, unsigned long cookie)
 	struct pbuf *tmp;
 
 	KSTATS_VECTOR(bsys_tcp_accept);
-
-	log_debug("tcpapi: bsys_tcp_accept() - handle %lx, cookie %lx\n",
-		  handle, cookie);
-
+	
 	if (unlikely(!api)) {
-		log_debug("tcpapi: invalid handle\n");
+		log_info("tcpapi: invalid handle\n");
 		return -RET_BADH;
 	}
 
@@ -300,18 +319,18 @@ ssize_t bsys_tcp_sendv(hid_t handle, struct sg_entry __user *ents,
 	if (unlikely(!api->alive))
 		return -RET_CLOSED;
 
-	if (unlikely(!uaccess_okay(ents, nrents * sizeof(struct sg_entry))))
-		return -RET_FAULT;
 
 	nrents = min(nrents, MAX_SG_ENTRIES);
 	for (i = 0; i < nrents; i++) {
 		err_t err;
-		void *base = (void *) uaccess_peekq((uint64_t *) &ents[i].base);
-		size_t len = uaccess_peekq(&ents[i].len);
+
+		void *base = (void *) ents[i].base;
+		size_t len = ents[i].len;
 		bool buf_full = len > min(api->pcb->snd_buf, 0xFFFF);
 
-		if (unlikely(!uaccess_okay(base, len)))
-			break;
+		// Checks if memory object lies in userspace - not necessary anymore
+		// if (unlikely(!uaccess_okay(base, len)))
+		//	break;
 
 		/*
 		 * FIXME: hacks to deal with LWIP's send buffering
@@ -368,6 +387,7 @@ long bsys_tcp_recv_done(hid_t handle, size_t len)
 
 	if (api->pcb)
 		tcp_recved(cur_fg, api->pcb, len);
+	
 	while (recvd) {
 		if (len < recvd->len)
 			break;
@@ -412,6 +432,19 @@ long bsys_tcp_close(hid_t handle)
 		remove_fdir_filter(api->id);
 		mempool_free(&percpu_get(id_mempool), api->id);
 	}
+
+	// Free spot in handle2pcb_array
+	unsigned int i = 0;
+	for (i = 0; i < MAX_PCBS; i++)
+	{
+		if (api == percpu_get(handle2pcb_array[i]))
+		{
+			percpu_get(handle2pcb_array[i]) = NULL;
+			break;
+		}
+	}
+
+	assert(i < MAX_PCBS);
 
 	mempool_free(&percpu_get(pcb_mempool), api);
 	return RET_OK;
@@ -553,8 +586,6 @@ static err_t on_accept(struct eth_fg *cur_fg, void *arg, struct tcp_pcb *pcb, er
 	api->id = id;
 	handle = tcpapi_to_handle(cur_fg, api);
 	api->handle = handle;
-	id = (struct ip_tuple *)
-	     mempool_pagemem_to_iomap(&percpu_get(id_mempool), id);
 
 	usys_tcp_knock(handle, id);
 	return ERR_OK;
@@ -692,6 +723,7 @@ static struct eth_fg *get_port_with_fdir(struct ip_tuple *id)
 	return outbound_fg();
 }
 
+// this is called by clietn on dial
 struct eth_fg *get_local_port_and_set_queue(struct ip_tuple *id)
 {
 	int ret;
@@ -701,11 +733,11 @@ struct eth_fg *get_local_port_and_set_queue(struct ip_tuple *id)
 	struct ix_rte_eth_dev *dev;
 	struct ix_rte_eth_rss_conf rss_conf;
 
-	if (eth_dev_count > 1)
+	if (rte_eth_dev_count() > 1)
 		panic("tcp_connect not implemented for bonded interfaces\n");
 
 	if (!percpu_get(local_port))
-		percpu_get(local_port) = percpu_get(cpu_id) * PORTS_PER_CPU;
+		percpu_get(local_port) = RTE_PER_LCORE(cpu_id) * PORTS_PER_CPU;
 
 	percpu_get(local_port)++;
 	id->src_port = percpu_get(local_port);
@@ -721,21 +753,28 @@ struct eth_fg *get_local_port_and_set_queue(struct ip_tuple *id)
 		return NULL;
 
 	while (1) {
-		if (percpu_get(local_port) >= (percpu_get(cpu_id) + 1) * PORTS_PER_CPU)
-			percpu_get(local_port) = percpu_get(cpu_id) * PORTS_PER_CPU + 1;
+		if (percpu_get(local_port) >= (RTE_PER_LCORE(cpu_id) + 1) * PORTS_PER_CPU)
+			percpu_get(local_port) = RTE_PER_LCORE(cpu_id) * PORTS_PER_CPU + 1;
 		hash = compute_toeplitz_hash(rss_conf.rss_key, htonl(id->dst_ip), htonl(id->src_ip), htons(id->dst_port), htons(id->src_port));
 		fg_idx = hash & (ETH_RSS_RETA_NUM_ENTRIES - 1);
-		if (percpu_get(eth_rxqs[0])->dev->data->rx_fgs[fg_idx].cur_cpu == percpu_get(cpu_id)) {
+		
+
+		//FIXME: need to figure out flow group stuff : do we need this code??
+		/*
+		if (percpu_get(eth_rxqs[0])->dev->data->rx_fgs[fg_idx].cur_cpu == RTE_PER_LCORE(cpu_id)) {
 			//set_current_queue(percpu_get(eth_rxqs)[0]);
 
 			// this will fail with eth_dev_count >1
 			assert(&percpu_get(eth_rxqs[0])->dev->data->rx_fgs[fg_idx] == fgs[fg_idx]);
 			eth_fg_set_current(&percpu_get(eth_rxqs[0])->dev->data->rx_fgs[fg_idx]);
-
+		*/
+		
 			return fgs[fg_idx];
+		/*
 		}
 		percpu_get(local_port)++;
 		id->src_port = percpu_get(local_port);
+		*/
 	}
 
 	return 0;
@@ -756,9 +795,7 @@ long bsys_tcp_connect(struct ip_tuple __user *id, unsigned long cookie)
 
 	percpu_get(syscall_cookie) = cookie;
 
-	if (unlikely(copy_from_user(id, &tmp, sizeof(struct ip_tuple)))) {
-		return -RET_FAULT;
-	}
+	tmp = *id;
 
 	tmp.src_ip = CFG.host_addr.addr;
 
@@ -824,7 +861,7 @@ extern int arp_lookup_mac(struct ip_addr *addr, struct eth_addr *mac);
 int tcp_output_packet(struct eth_fg *cur_fg, struct tcp_pcb *pcb, struct pbuf *p)
 {
 	int ret;
-	struct mbuf *pkt;
+	struct rte_mbuf *pkt;
 	struct eth_hdr *ethhdr;
 	struct ip_hdr *iphdr;
 	unsigned char *payload;
@@ -832,16 +869,16 @@ int tcp_output_packet(struct eth_fg *cur_fg, struct tcp_pcb *pcb, struct pbuf *p
 	struct ip_addr dst_addr;
 
 	pkt = mbuf_alloc_local();
-	if (unlikely(!pkt))
+	if (unlikely(!(pkt)))
 		return -ENOMEM;
 
-	ethhdr = mbuf_mtod(pkt, struct eth_hdr *);
+	ethhdr = rte_pktmbuf_mtod(pkt, struct eth_hdr *);
 	iphdr = mbuf_nextd(ethhdr, struct ip_hdr *);
 	payload = mbuf_nextd(iphdr, unsigned char *);
 
 	dst_addr.addr = ntoh32(pcb->remote_ip.addr);
 
-	/* setup IP hdr */
+	// setup IP hdr 
 	IPH_VHL_SET(iphdr, 4, sizeof(struct ip_hdr) / 4);
 	//iphdr->header_len = sizeof(struct ip_hdr) / 4;
 	//iphdr->version = 4;
@@ -855,22 +892,28 @@ int tcp_output_packet(struct eth_fg *cur_fg, struct tcp_pcb *pcb, struct pbuf *p
 	iphdr->src.addr = pcb->local_ip.addr;
 	iphdr->dest.addr = pcb->remote_ip.addr;
 
+	// Offload IP and TCP tx checksums 
+	pkt->ol_flags = PKT_TX_IP_CKSUM;
+	pkt->ol_flags |= PKT_TX_TCP_CKSUM;
+	pkt->ol_flags |= PKT_TX_IPV4;
+
+	pkt->l2_len = sizeof (struct eth_hdr);
+	pkt->l3_len = sizeof (struct ip_hdr);
+	
+	//p->cksum = rte_ipv4_phdr_cksum(iphdr, pkt->ol_flags); //FIXME: pseudo header??
+
 	for (curp = p; curp; curp = curp->next) {
 		memcpy(payload, curp->payload, curp->len);
 		payload += curp->len;
 	}
 
-	/* Offload IP and TCP tx checksums */
-	pkt->ol_flags = PKT_TX_IP_CKSUM;
-	pkt->ol_flags |= PKT_TX_TCP_CKSUM;
-
 	ret = ip_send_one(cur_fg, &dst_addr, pkt, sizeof(struct eth_hdr) +
 			  sizeof(struct ip_hdr) + p->tot_len);
 	if (unlikely(ret)) {
-		mbuf_free(pkt);
+		rte_pktmbuf_free(pkt);
 		return -EIO;
 	}
-
+	
 	return 0;
 }
 
@@ -879,7 +922,7 @@ int tcp_api_init(void)
 {
 	int ret;
 	ret = mempool_create_datastore(&pcb_datastore, MAX_PCBS,
-				       sizeof(struct tcpapi_pcb), 0, MEMPOOL_DEFAULT_CHUNKSIZE, "pcb");
+				       sizeof(struct tcpapi_pcb), "pcb");
 	if (ret)
 		return ret;
 
@@ -887,11 +930,10 @@ int tcp_api_init(void)
 		panic("tcp_api_init -- wrong ELEM_LEN\n");
 
 	ret = mempool_create_datastore(&id_datastore, MAX_PCBS,
-				       sizeof(struct ip_tuple), 1, MEMPOOL_DEFAULT_CHUNKSIZE, "ip");
+				       sizeof(struct ip_tuple), "ip");
 	if (ret)
 		return ret;
 
-	ret = mempool_pagemem_map_to_user(&id_datastore);
 	return ret;
 }
 
@@ -899,11 +941,15 @@ int tcp_api_init(void)
 int tcp_api_init_cpu(void)
 {
 	int ret;
-	ret = mempool_create(&percpu_get(pcb_mempool), &pcb_datastore, MEMPOOL_SANITY_PERCPU, percpu_get(cpu_id));
+	ret = mempool_create(&percpu_get(pcb_mempool), &pcb_datastore, MEMPOOL_SANITY_PERCPU, RTE_PER_LCORE(cpu_id));
 	if (ret)
 		return ret;
+	
+	// Initializing per core array of tcpapi_pcb pointers
+	for (unsigned int i = 0; i < MAX_PCBS; i++)
+		percpu_get(handle2pcb_array[i]) = NULL;
 
-	ret = mempool_create(&percpu_get(id_mempool), &id_datastore, MEMPOOL_SANITY_PERCPU, percpu_get(cpu_id));
+	ret = mempool_create(&percpu_get(id_mempool), &id_datastore, MEMPOOL_SANITY_PERCPU, RTE_PER_LCORE(cpu_id));
 	if (ret)
 		return ret;
 

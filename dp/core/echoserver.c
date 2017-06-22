@@ -1,35 +1,4 @@
 /*
- * Copyright (c) 2015-2017, Stanford University
- *  
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- * 
- *  * Redistributions of source code must retain the above copyright notice, 
- *    this list of conditions and the following disclaimer.
- * 
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- * 
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-/*
  * Copyright 2013-16 Board of Trustees of Stanford University
  * Copyright 2013-16 Ecole Polytechnique Federale Lausanne (EPFL)
  *
@@ -56,8 +25,8 @@
 #include <pthread.h>
 #include <stdio.h>
 
+#include <ix/mempool.h>
 #include <ixev.h>
-#include <mempool.h>
 
 #define ROUND_UP(num, multiple) ((((num) + (multiple) - 1) / (multiple)) * (multiple))
 
@@ -169,7 +138,7 @@ static void *pp_main(void *arg)
 		return NULL;
 	};
 
-	ret = mempool_create(&pp_conn_pool, &pp_conn_datastore);
+	ret = mempool_create(&pp_conn_pool, &pp_conn_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret) {
 		fprintf(stderr, "unable to create mempool\n");
 		return NULL;
@@ -182,22 +151,22 @@ static void *pp_main(void *arg)
 	return NULL;
 }
 
-int main(int argc, char *argv[])
+int echoserver_main(int argc, char *argv[])
 {
 	int i, nr_cpu;
 	pthread_t tid;
 	int ret;
 	unsigned int pp_conn_pool_entries;
 
-	if (argc < 2) {
+	if (argc < 1) {
 		fprintf(stderr, "Usage: %s MSG_SIZE [MAX_CONNECTIONS]\n", argv[0]);
 		return -1;
 	}
 
-	msg_size = atol(argv[1]);
+	msg_size = atol(argv[0]);
 
-	if (argc >= 3)
-		pp_conn_pool_entries = atoi(argv[2]);
+	if (argc >= 2)
+		pp_conn_pool_entries = atoi(argv[1]);
 	else
 		pp_conn_pool_entries = 16 * 4096;
 
@@ -209,14 +178,14 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 
-	ret = mempool_create_datastore(&pp_conn_datastore, pp_conn_pool_entries, sizeof(struct pp_conn) + msg_size, 0, MEMPOOL_DEFAULT_CHUNKSIZE, "pp_conn");
+	ret = mempool_create_datastore(&pp_conn_datastore, pp_conn_pool_entries, sizeof(struct pp_conn) + msg_size, "pp_conn");
 
 	if (ret) {
 		fprintf(stderr, "unable to create mempool\n");
 		return ret;
 	}
 
-	nr_cpu = sys_nrcpus();
+	nr_cpu = cpus_active;
 	if (nr_cpu < 1) {
 		fprintf(stderr, "got invalid cpu count %d\n", nr_cpu);
 		exit(-1);

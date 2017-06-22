@@ -62,6 +62,10 @@
  * hard to add at all.
  */
 
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_mbuf.h>
+
 #include <ix/stddef.h>
 #include <ix/errno.h>
 #include <ix/list.h>
@@ -86,7 +90,7 @@ struct pending_pkt {
 	struct hlist_node	link;
 	struct ip_addr		dst_addr;
 	struct eth_fg		*fg;
-	struct mbuf		*mbuf;
+	struct rte_mbuf		*mbuf;
 	int			len;
 	int			cpu;
 	char			dispatched;
@@ -260,13 +264,13 @@ static int arp_send_pkt(uint16_t op,
 			struct eth_addr *target_mac)
 {
 	int ret;
-	struct mbuf *pkt;
+	struct rte_mbuf *pkt;
 	struct eth_hdr *ethhdr;
 	struct arp_hdr *arphdr;
 	struct arp_hdr_ethip *ethip;
 
 	pkt = mbuf_alloc_local();
-	if (unlikely(!pkt))
+	if (unlikely(!(pkt)))
 		return -ENOMEM;
 
 	ethhdr = mbuf_mtod(pkt, struct eth_hdr *);
@@ -290,9 +294,10 @@ static int arp_send_pkt(uint16_t op,
 
 	pkt->ol_flags = 0;
 
-	/* FIXME: need an API to specify default TX queue */
-//	set_current_queue(percpu_get(eth_rxqs[0]));
-	ret = eth_send_one(percpu_get(eth_txqs)[0], pkt, ARP_PKT_SIZE);
+	pkt->pkt_len = ARP_PKT_SIZE;
+	pkt->data_len = ARP_PKT_SIZE;
+	// Note: always send arp replies from port 0, queue 0
+	ret = rte_eth_tx_burst(0, 0, &pkt, 1); 
 
 	if (unlikely(ret)) {
 		mbuf_free(pkt);
@@ -302,12 +307,12 @@ static int arp_send_pkt(uint16_t op,
 	return 0;
 }
 
-static int arp_send_response_reuse(struct mbuf *pkt,
+static int arp_send_response_reuse(struct rte_mbuf *pkt,
 				   struct arp_hdr *arphdr,
 				   struct arp_hdr_ethip *ethip)
 {
 	int ret;
-	struct eth_hdr *ethhdr = mbuf_mtod(pkt, struct eth_hdr *);
+	struct eth_hdr *ethhdr = rte_pktmbuf_mtod(pkt, struct eth_hdr *);
 	ethhdr->dhost = ethhdr->shost;
 	arphdr->op = hton16(ARP_OP_REPLY);
 	ethip->target_mac = ethip->sender_mac;
@@ -317,12 +322,16 @@ static int arp_send_response_reuse(struct mbuf *pkt,
 	ethip->sender_ip.addr = hton32(CFG.host_addr.addr);
 	ethip->sender_mac = CFG.mac;
 
-	pkt->ol_flags = 0;
-	/* FIXME - is this always queue 0? (EdB) */
-	ret = eth_send_one(percpu_get(eth_txqs)[0], pkt, ARP_PKT_SIZE);
 
-	if (unlikely(ret)) {
-		mbuf_free(pkt);
+	pkt->ol_flags = 0;
+	pkt->pkt_len = ARP_PKT_SIZE;
+	pkt->data_len = ARP_PKT_SIZE;
+	// Note: always send arp replies from port 0, queue 0
+	ret = rte_eth_tx_burst(0, 0, &pkt, 1); 
+
+	if (ret < 1) {
+		log_info("warning: did not send arp reply, ret %d\n", ret);
+		rte_pktmbuf_free(pkt);
 		return -EIO;
 	}
 
@@ -334,7 +343,7 @@ static int arp_send_response_reuse(struct mbuf *pkt,
  * @pkt: the packet
  * @hdr: the ARP header (inside the packet)
  */
-void arp_input(struct mbuf *pkt, struct arp_hdr *hdr)
+void arp_input(struct rte_mbuf *pkt, struct arp_hdr *hdr)
 {
 	int op;
 	struct arp_hdr_ethip *ethip;
@@ -380,7 +389,7 @@ void arp_input(struct mbuf *pkt, struct arp_hdr *hdr)
 	}
 
 out:
-	mbuf_free(pkt);
+	rte_pktmbuf_free(pkt);
 }
 
 /**
@@ -483,10 +492,11 @@ static void arp_timer_handler(struct timer *t, struct eth_fg *cur_fg)
 		arp_send_pkt(ARP_OP_REQUEST, &e->addr, &target);
 	}
 
-	timer_add(t, NULL, ARP_RETRY_TIMEOUT);
+	//FIXME: hopefully this is ok to take out, it was causing occasional seg fault
+	//timer_add(t, NULL, ARP_RETRY_TIMEOUT);
 }
 
-int arp_add_pending_pkt(struct ip_addr *dst_addr, struct eth_fg *fg, struct mbuf *mbuf, size_t len)
+int arp_add_pending_pkt(struct ip_addr *dst_addr, struct eth_fg *fg, struct rte_mbuf *mbuf, size_t len)
 {
 	struct pending_pkt *pkt;
 	struct arp_entry *e = arp_lookup(dst_addr, false);
@@ -520,17 +530,20 @@ int arp_init(void)
 {
 	int ret;
 
-	ret = mempool_create_datastore(&pending_pkt_datastore, MAX_PENDING_PKTS, sizeof(struct pending_pkt), 0, MEMPOOL_DEFAULT_CHUNKSIZE, "pending_pkt");
+	//NEW!
+	spin_lock_init(&pending_pkt_lock);
+
+	ret = mempool_create_datastore(&pending_pkt_datastore, MAX_PENDING_PKTS, sizeof(struct pending_pkt), "pending_pkt");
 	if (ret)
 		return ret;
-
 	ret = mempool_create(&pending_pkt_mempool, &pending_pkt_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret)
 		return ret;
-
-	ret = mempool_create_datastore(&arp_datastore, ARP_MAX_ENTRIES, sizeof(struct arp_entry), 0, MEMPOOL_DEFAULT_CHUNKSIZE, "arp");
+	
+	ret = mempool_create_datastore(&arp_datastore, ARP_MAX_ENTRIES, sizeof(struct arp_entry), "arp");
 	if (ret)
 		return ret;
+
 	return mempool_create(&arp_mempool, &arp_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 }
 

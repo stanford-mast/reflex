@@ -2,23 +2,31 @@
 
 ReFlex is a software-based system that provides remote access to Flash with performance nearly identical to local Flash access. ReFlex closely integrates network and storage processing in a dataplane  kernel to achieve low latency and high throughput at low resource requirements. ReFlex uses a novel I/O scheduler to enforce tail latency and throughput service-level objectives (SLOs) for multiple clients sharing a remote Flash device.
 
-## Requirements
+ReFlex is an extension of the [IX dataplace operating system](https://github.com/ix-project/ix). ReFlex uses Intel [DPDK](http://dpdk.org) for fast packet processing and Intel [SPDK](http://www.spdk.io) for high performance access to NVMe Flash. There are two implementations of ReFlex currently available: a kernel implementation and a userspace implementation. 
 
-ReFlex requires a NVMe Flash device and a [network interface card supported by Intel DPDK](http://dpdk.org/doc/nics). We have tested ReFlex with the Intel 82599 10GbE NIC. The driver is provided in `dp/drivers/ixgbe.c`. We have tested ReFlex with the following NVMe SSDs: Samsung PM1725 and Intel P3600.  
+In the kernel implementation (available in the [master](https://github.com/stanford-mast/reflex/tree/master) branch), the ReFlex kernel runs as a guest OS in Linux and relies on the [Dune](https://github.com/project-dune/dune) kernel for memory management and direct access to hardware (e.g., NIC and NVMe Flash queues) from userspace applications. This is the original implementation of ReFlex, as presented in the [paper](https://web.stanford.edu/group/mast/cgi-bin/drupal/system/files/reflex_asplos17.pdf) published at ASPLOS'17. 
 
-ReFlex is an extension of the [IX dataplane operating system](https://github.com/ix-project/ix) and thus inherits the dependencies described  on the [IX requirements page](https://github.com/ix-project/ix/wiki/Requirements).  In particular, ReFlex currently relies on [Dune](http://dune.scs.stanford.edu)  to provide direct access to hardware (such as NIC and NVMe queues) from userspace. ReFlex uses Intel [DPDK](http://dpdk.org) for fast packet processing and Intel  [SPDK](http://www.spdk.io) for high performance access to NVMe Flash. Currently, ReFlex has been successfully tested on Ubuntu 16.04 LTS with kernel 4.4.0.
+In the userspace implementation (available in the ([userspace](https://github.com/stanford-mast/reflex/tree/userspace) branch), network and storage processing is implemented in userspace and ReFlex uses the standard `igb_uio` module to bind a network device to a DPDK-provided network device driver. The userspace version of ReFlex does not require the Dune kernel module to be loaded. This means the userspace version of ReFlex is simpler to deploy.  
+
+
+## Requirements for userspace version of ReFlex
+
+ReFlex requires a NVMe Flash device and a [network interface card supported by Intel DPDK](http://dpdk.org/doc/nics). We have tested ReFlex with the Intel 82599 10GbE NIC. We have tested ReFlex with the following NVMe SSDs: Samsung PM1725 and Intel P3600. 
+
+ReFlex has been successfully tested on Ubuntu 16.04 LTS with kernel 4.4.0.
 
 **Note:** ReFlex provides an efficient *dataplane* for remote access to Flash. To deploy ReFlex in a datacenter cluster, ReFlex should be combined with a control plane to manage Flash resources across machines and optimize the allocation of Flash IOPS and capacity.  
 
 ## Setup Instructions
 
-There is currently no binary distribution of ReFlex. You will therefore need  to compile the project from source, as described below. 
+There is currently no binary distribution of ReFlex. You will therefore need to compile the project from source, as described below. 
 
 1. Obtain ReFlex source code and fetch dependencies:
 
    ```
    git clone https://github.com/stanford-mast/reflex.git
    cd reflex
+   git checkout userspace
    ./deps/fetch-deps.sh
    ```
 
@@ -32,13 +40,16 @@ There is currently no binary distribution of ReFlex. You will therefore need  to
 
    ```
    sudo chmod +r /boot/System.map-`uname -r`
-   make -sj64 -C deps/dune
    make -sj64 -C deps/pcidma
    make -sj64 -C deps/dpdk config T=x86_64-native-linuxapp-gcc
    make -sj64 -C deps/dpdk
+    # Add the full path to your DPDK build folder in deps/spdk/CONFIG. It should be added to the CONFIG_DPDK_DIR variable 
+	# Example: CONFIG_DPDK_DIR?=/home/user/ix_spdk/deps/dpdk/build
    make -sj64 -C deps/spdk config.h
-   make -sj64 -C deps/spdk/lib/nvme/ CONFIG_NVME_IMPL="../../../../inc/ix/spdk.h -I ../../../dpdk/build/include/ -I ../../../../inc/ -D__KERNEL__"
-   make -sj64 -C deps/spdk/lib/util/ CONFIG_NVME_IMPL="../../../../inc/ix/spdk.h -I ../../../../inc/ -D__KERNEL__"
+   make -sj64 -C deps/spdk/lib/nvme/ CONFIG_NVME_IMPL="../../../../dp/drivers/nvme_impl.h -I ../../../dpdk/build/include/ -I deps/spdk/include/ -I ../../../../inc/ -D__KERNEL__"
+   make -sj64 -C deps/spdk/lib/util/ CONFIG_NVME_IMPL="../../../../dp/drivers/nvme_impl.h -I deps/spdk/include/ -I ../../../../inc/ -D__KERNEL__"
+   make -sj64 -C deps/spdk/lib/memory/ CONFIG_NVME_IMPL="../../../../dp/drivers/nvme_impl.h -I ../../../dpdk/build/include/ -I deps/spdk/include/ -I ../../../../inc/ -D__KERNEL__"
+	
    ```
 
 4. Build ReFlex:
@@ -54,29 +65,14 @@ There is currently no binary distribution of ReFlex. You will therefore need  to
    sudo sh -c 'for i in /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages; do echo 4096 > $i; done'
    sudo modprobe -r ixgbe
    sudo modprobe -r nvme
-   sudo insmod deps/dune/kern/dune.ko
+   sudo modprobe uio
    sudo insmod deps/pcidma/pcidma.ko
+   
+   sudo insmod deps/dpdk/build/kmod/igb_uio.ko
+   sudo deps/dpdk/tools/dpdk_nic_bind.py --bind=igb_uio 0000:06:00.0   # insert device PCI address here!!! 
    ```
    
-6. (Optional) Run IX TCP echo server to check that your setup is correct:
-
-   ```
-   sudo ./dp/ix -- ./apps/echoserver 4
-   ```
-
-   Then, try from another Linux host:
-
-   ```
-   echo 123 | nc -vv <IP> <PORT>
-   ```
-   You should see the following output: 
-
-   ```
-   Connection to <IP> <PORT> port [tcp/*] succeeded!
-   123
-   ```
-
-7. Precondition the SSD and derive the request cost model:
+6. Precondition the SSD and derive the request cost model:
 
    It is necessary to precondition the SSD to acheive steady-state performance and reproducible results across runs. We recommend preconditioning the SSD with the following local Flash tests: write *sequentially* to the entire address space using 128KB requests, then write *randomly* to the device with 4KB requests until you see performance reach steady state. The random write test typically takes about 10 to 20 minutes, depending on the device model and capacity. 
    
@@ -98,7 +94,7 @@ There is currently no binary distribution of ReFlex. You will therefore need  to
 ### 1. Run the ReFlex server:
 
    ```
-   sudo ./dp/ix -- ./apps/reflex_server
+   sudo ./dp/ix
    ```
 
    ReFlex runs one dataplane thread per CPU core. If you want to run multiple ReFlex threads (to support higher throughput), set the `cpu` list in ix.conf and add `fdir` rules to steer traffic identified by {dest IP, src IP, dest port} to a particular core.
@@ -184,7 +180,7 @@ There are several options for clients:
 
 	* This client option avoids networking and storage (filesystem and block layer) overhead on the client machine. It requires the client machine to run IX.
 	
-   Clone ReFlex source code on client machine and follow steps 1 to 6 in the setup instructions. Comment out `nvme_devices` in ix.conf. Run IX-based ReFlex client:
+   The ReFlex client implementation is currently only available in the kernel version of ReFlex. Clone ReFlex source code (master branch) on client machine and follow steps 1 to 6 in the setup instructions in master branch README. Comment out `nvme_devices` in ix.conf. Run IX-based ReFlex client:
 
    ```
    sudo ./dp/ix -- ./apps/reflex_ix_client IP PORT SEQUENTIAL? NUM_THREADS REQ/s READ% SWEEP? REQ_SIZE PRECONDITION? 
@@ -244,7 +240,7 @@ The original ReFlex code was written collaboratively by Ana Klimovic and Heiner 
 
 ## Future work
 
-We are actively working on a userspace-only implementation of ReFlex which does not use Dune. This implementation will simplify ReFlex deployment since the only requirements for running ReFlex will be a kernel and network/Flash hardware that support DPDK and SPDK.
+The userspace implementation of ReFlex is for the ReFlex server. We are working on a shared userspace library based on ReFlex/IX which will allow client applications to submit requests to a remote ReFlex server using the efficient DPDK-based TCP network processing in ReFlex/IX. 
 
 The current implementation of ReFlex would also benefit from the following:
 

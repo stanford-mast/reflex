@@ -58,17 +58,16 @@
 
 #pragma once
 
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_mempool.h>
+
 #include <ix/stddef.h>
-#include <ix/mem.h>
 #include <assert.h>
 #include <ix/cpu.h>
 #include <ix/ethfg.h>
 #include <ix/log.h>
 
-
-#ifndef __KERNEL__
-#error "wrong include .. this is for IX kernel only"
-#endif
 
 
 #define MEMPOOL_DEFAULT_CHUNKSIZE 128
@@ -82,54 +81,27 @@
 #define MEMPOOL_INITIAL_OFFSET (0)
 #endif
 
-struct mempool_hdr {
-	struct mempool_hdr *next;
-	struct mempool_hdr *next_chunk;
-} __packed;
-
-
 // one per data type
 struct mempool_datastore {
 	uint64_t                 magic;
 	spinlock_t               lock;
-	struct mempool_hdr      *chunk_head;
-	void			*buf;
-	int			nr_pages;
+	struct rte_mempool	*pool;
 	uint32_t                nr_elems;
 	size_t                  elem_len;
-	int                     nostraddle;
-	int                     chunk_size;
-	int                     num_chunks;
-	int                     free_chunks;
 	int64_t                 num_locks;
 	const char             *prettyname;
 	struct mempool_datastore *next_ds;
-#ifdef __KERNEL__
-	void 			*iomap_addr;
-	uintptr_t		iomap_offset;
-#endif
 };
 
 
 struct mempool {
-	// hot fields:
-	struct mempool_hdr	*head;
 	int                     num_free;
 	size_t                  elem_len;
 
 	uint64_t                 magic;
-	void			*buf;
 	struct mempool_datastore *datastore;
-	struct mempool_hdr      *private_chunk;
-//	int			nr_pages;
 	int                     sanity;
 	uint32_t                nr_elems;
-	int                     nostraddle;
-	int                     chunk_size;
-#ifdef __KERNEL__
-	void 			*iomap_addr;
-	uintptr_t		iomap_offset;
-#endif
 };
 #define MEMPOOL_MAGIC   0x12911776
 
@@ -185,15 +157,18 @@ static inline int __mempool_get_sanity(void *a)
 extern void *mempool_alloc_2(struct mempool *m);
 static inline void *mempool_alloc(struct mempool *m)
 {
-	struct mempool_hdr *h = m->head;
-
-	if (likely(h)) {
-		m->head = h->next;
-		m->num_free--;
-		return (void *) h;
-	} else {
-		return mempool_alloc_2(m);
+	// PTR to fill form mempool
+	void *ptr;
+	
+	// Get memory from mempool 
+	int ret = rte_mempool_get(m->datastore->pool, &ptr);
+	if (ret){
+		log_info("rte_mempool_get returned error %d\n", ret);
+		return NULL;
 	}
+	else
+		return ptr;
+
 }
 
 /**
@@ -206,67 +181,33 @@ static inline void *mempool_alloc(struct mempool *m)
 extern void mempool_free_2(struct mempool *m, void *ptr);
 static inline void mempool_free(struct mempool *m, void *ptr)
 {
-	struct mempool_hdr *elem = (struct mempool_hdr *) ptr;
-	MEMPOOL_SANITY_ACCESS(ptr);
 
-	if (likely(m->num_free < m->chunk_size)) {
-		m->num_free++;
-		elem->next = m->head;
-		m->head = elem;
-	} else
-		mempool_free_2(m, ptr);
+	// Put memory back into mempool 
+	rte_mempool_put(m->datastore->pool, ptr);
+
 }
 
 static inline void *mempool_idx_to_ptr(struct mempool *m, uint32_t idx, int elem_len)
 {
 	void *p;
 	assert(idx < m->nr_elems);
-	assert(!m->nostraddle);
-	p = m->buf + elem_len * idx + MEMPOOL_INITIAL_OFFSET;
+	p= m->datastore + elem_len * idx + MEMPOOL_INITIAL_OFFSET;
 	MEMPOOL_SANITY_ACCESS(p);
 	return p;
 }
 
 static inline uintptr_t mempool_ptr_to_idx(struct mempool *m, void *p, int elem_len)
 {
-	uintptr_t x = (uintptr_t)p - (uintptr_t)m->buf - MEMPOOL_INITIAL_OFFSET;
+	uintptr_t x = (uintptr_t)p - (uintptr_t)m->datastore->pool - MEMPOOL_INITIAL_OFFSET;
 	x = x / elem_len;
 	assert(x < m->nr_elems);
 	return x;
 }
 
 
-extern int mempool_create_datastore(struct mempool_datastore *m, int nr_elems, size_t elem_len, int nostraddle, int chunk_size, const char *prettyname);
+extern int mempool_create_datastore(struct mempool_datastore *m, int nr_elems, size_t elem_len, const char *prettyname);
 extern int mempool_create(struct mempool *m, struct mempool_datastore *mds, int16_t sanity_type, int16_t sanity_id);
 extern void mempool_destroy(struct mempool *m);
 
 
-#ifdef __KERNEL__
-
-/**
- * mempool_pagemem_to_iomap - get the IOMAP address of a mempool entry
- * @m: the mempool
- * @ptr: a pointer to the target entry
- *
- * Returns an IOMAP address.
- */
-static inline void *mempool_pagemem_to_iomap(struct mempool *m, void *ptr)
-{
-	assert(m->iomap_offset);
-	return (void *)((uintptr_t) ptr + m->iomap_offset);
-}
-
-static inline void *mempool_iomap_to_ptr(struct mempool *m, void *ioptr)
-{
-	assert(m->iomap_offset);
-	return ((void *)((uintptr_t)(ioptr) - m->iomap_offset));
-}
-
-
-//extern int
-//mempool_pagemem_create(struct mempool *m, int nr_elems, size_t elem_len,int16_t sanity_type, int16_t sanity_id);
-extern int mempool_pagemem_map_to_user(struct mempool_datastore *m);
-extern void mempool_pagemem_destroy(struct mempool_datastore *m);
-
-#endif /* __KERNEL__ */
 

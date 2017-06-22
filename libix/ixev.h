@@ -91,11 +91,10 @@ struct ixev_conn_ops {
 	void		  (*dialed) (struct ixev_ctx *ctx, long ret);
 };
 
-//FIXME: not sure what kind of ops want here!!!
 struct ixev_nvme_ops {
-	void (*opened) (hqu_t handle, unsigned long ns_size, unsigned long ns_sector_size); //???
-	void (*registered_flow) (long flow_group_id, struct ixev_ctx* ctx, long ret); //???
-	void (*unregistered_flow) (long flow_group_id, long ret); //???
+	void (*opened) (hqu_t handle, unsigned long ns_size, unsigned long ns_sector_size);
+	void (*registered_flow) (long flow_group_id, struct ixev_ctx* ctx, long ret);
+	void (*unregistered_flow) (long flow_group_id, long ret);
 };
 
 /*
@@ -157,7 +156,7 @@ struct ixev_nvme_ioq_ctx {
 	unsigned int	trig_mask;		/* a mask of triggered events */
 	unsigned long 	curr_queue_depth;
 };
-//FIXME: not sure of relationship between ioq and req contexts!!!
+
 struct ixev_nvme_req_ctx {
 	struct ixev_nvme_ioq_ctx *ctx;
 	hqu_t 			handle;			/* the queue handle submitting this request to */

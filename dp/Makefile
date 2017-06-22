@@ -24,13 +24,14 @@
 # path for this Makefile to work properly.
 
 DPDK	= ../deps/dpdk
-DUNE	= ../deps/dune
 SPDK    = ../deps/spdk
-DPDK_INC = -I$(DPDK)/build/include -I$(DPDK)/lib/librte_eal/common -I$(DPDK)/drivers/net/ixgbe
+DPDK_INC = -I$(DPDK)/build/include -I$(DPDK)/lib/librte_eal/common 
 SPDK_INC = -idirafter$(SPDK)/include
-INC	= -I../inc -I$(DUNE)/libdune -I../inc/lwip -I../inc/lwip/ipv4 -I../inc/lwip/ipv6 $(DPDK_INC) $(SPDK_INC) -include$(DUNE)/kern/dune.h
+INC	= -I../inc -I../inc/lwip -I../inc/lwip/ipv4 -I../inc/lwip/ipv6 $(DPDK_INC) $(SPDK_INC) -I../libix
 CC	= gcc
-CFLAGS	= -g -Wall -fno-dwarf2-cfi-asm -fno-asynchronous-unwind-tables -O3 -mno-red-zone $(INC) -D__KERNEL__ $(EXTRA_CFLAGS) -DSPDK_STRING_H
+
+#DPDK_MACHINE_FLAGS = -march=native -DRTE_MACHINE_CPUFLAG_SSE -DRTE_MACHINE_CPUFLAG_SSE2 -DRTE_MACHINE_CPUFLAG_SSE3 -DRTE_MACHINE_CPUFLAG_SSSE3 -DRTE_MACHINE_CPUFLAG_SSE4_1 -DRTE_MACHINE_CPUFLAG_SSE4_2 -DRTE_MACHINE_CPUFLAG_AES -DRTE_MACHINE_CPUFLAG_PCLMULQDQ -DRTE_MACHINE_CPUFLAG_AVX -DRTE_MACHINE_CPUFLAG_RDRAND -DRTE_MACHINE_CPUFLAG_FSGSBASE -DRTE_MACHINE_CPUFLAG_F16C -DRTE_MACHINE_CPUFLAG_AVX2
+CFLAGS	= -g -w -fno-dwarf2-cfi-asm -fno-asynchronous-unwind-tables -O3 -mno-red-zone $(INC) -D__KERNEL__ $(EXTRA_CFLAGS) -DSPDK_STRING_H
 PCIDMA	= ../deps/pcidma
 INC	+= -I$(PCIDMA)
 LD	= gcc
@@ -46,7 +47,7 @@ CFLAGS += -DENABLE_KSTATS
 endif
 
 SRCS =
-DIRS = core drivers lwip net sandbox
+DIRS = core drivers lwip net
 
 define register_dir
 SRCS += $(patsubst %, $(1)/%, $(2))
@@ -60,8 +61,6 @@ include $(patsubst %, %/dir.mk, $(DIRS))
 all: ix
 
 OBJS=$(subst .c,.o,$(SRCS))
-
-DUNE_LIB=$(DUNE)/libdune/libdune.a
 
 depend: .depend
 
@@ -82,9 +81,14 @@ DPDK_LIBS+=$(DPDK)/build/lib/librte_ring.a
 
 SPDK_LIBS=$(SPDK)/lib/nvme/libspdk_nvme.a
 SPDK_LIBS+=$(SPDK)/lib/util/libspdk_util.a
+SPDK_LIBS+=$(SPDK)/lib/memory/libspdk_memory.a
 
-ix: $(DEPENDENCY) $(OBJS) $(DUNE_LIB) ix.ld
-	$(LD) $(LDFLAGS) -o ix $(OBJS) $(DUNE_LIB) $(SPDK_LIBS) $(DPDK_LIBS) $(LDLIBS)
+IX_LIBS+=../libix/libix.a
+
+#ix: $(DEPENDENCY) $(OBJS) $(DUNE_LIB) ix.ld
+#	$(LD) $(LDFLAGS) -o ix $(OBJS) $(DUNE_LIB) $(SPDK_LIBS) $(DPDK_LIBS) $(LDLIBS) $(IX_LIBS)
+ix: $(DEPENDENCY) $(OBJS) ix.ld
+	$(LD) $(LDFLAGS) -o ix $(OBJS) $(SPDK_LIBS) $(DPDK_LIBS) $(LDLIBS) $(IX_LIBS)
 clean:
 	rm -f $(OBJS) ix .depend
 

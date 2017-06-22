@@ -58,20 +58,25 @@
 
 #pragma once
 
+#include <rte_per_lcore.h>
+
 #include <ix/stddef.h>
 #include <asm/cpu.h>
+#include <ix/log.h>
+
 
 #define NCPU	128
 extern int cpu_count; /* the number of available CPUs */
 extern int cpus_active; /* the number of in-use CPUs */
 
+
 /* used to define percpu variables */
 #define DEFINE_PERCPU(type, name) \
-	typeof(type) name __attribute__((section(".percpu,\"\",@nobits#")))
+	(RTE_DEFINE_PER_LCORE(type, name))
 
 /* used to make percpu variables externally available */
 #define DECLARE_PERCPU(type, name) \
-	extern DEFINE_PERCPU(type, name)
+	(RTE_DELCARE_PER_LCORE(type, name))
 
 extern void *percpu_offsets[NCPU];
 
@@ -82,6 +87,7 @@ extern void *percpu_offsets[NCPU];
  *
  * Returns a percpu variable.
  */
+// TODO: Might need to change depending on where RTE_PER_LCORE stores variables
 #define percpu_get_remote(var, cpu)				\
 	(*((typeof(var) *) ((uintptr_t) &var +			\
 			    (uintptr_t) percpu_offsets[(cpu)])))
@@ -91,7 +97,6 @@ static inline void *__percpu_get(void *key)
 	void *offset;
 
 	asm("mov %%gs:0, %0" : "=r"(offset));
-
 	return (void *)((uintptr_t) key + (uintptr_t) offset);
 }
 
@@ -111,7 +116,7 @@ static inline void *__percpu_get(void *key)
  * Returns a percpu variable.
  */
 #define percpu_get(var)						\
-	(*percpu_get_addr(var))
+	(RTE_PER_LCORE(var))
 
 /**
  * cpu_is_active - is the CPU being used?
@@ -141,9 +146,9 @@ static inline unsigned int __cpu_next_active(unsigned int cpu)
 #define for_each_active_cpu(cpu)				\
 	for ((cpu) = -1; (cpu) = __cpu_next_active(cpu); (cpu) < cpu_count)
 
-DECLARE_PERCPU(unsigned int, cpu_numa_node);
-DECLARE_PERCPU(unsigned int, cpu_id);
-DECLARE_PERCPU(unsigned int, cpu_nr);
+RTE_DECLARE_PER_LCORE(unsigned int, cpu_numa_node);
+RTE_DECLARE_PER_LCORE(unsigned int, cpu_id);
+RTE_DECLARE_PER_LCORE(unsigned int, cpu_nr);
 
 extern void cpu_do_bookkeeping(void);
 

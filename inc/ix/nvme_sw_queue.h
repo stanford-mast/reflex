@@ -37,7 +37,6 @@
 
 #include <ix/nvmedev.h>
 #include <ix/list.h>
-
 #define NVME_SW_QUEUE_SIZE (256*8)  
 
 struct nvme_sw_queue

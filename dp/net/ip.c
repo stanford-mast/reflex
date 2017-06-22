@@ -58,6 +58,10 @@
 
 #include <stdio.h>
 
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_mbuf.h>
+
 #include <ix/stddef.h>
 #include <ix/byteorder.h>
 #include <ix/errno.h>
@@ -91,7 +95,7 @@ void ip_addr_to_str(struct ip_addr *addr, char *str)
 		 (addr->addr & 0xff));
 }
 
-static void ip_input(struct eth_fg *cur_fg, struct mbuf *pkt, struct ip_hdr *hdr)
+static void ip_input(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct ip_hdr *hdr)
 {
 	int hdrlen, pktlen;
 
@@ -99,22 +103,26 @@ static void ip_input(struct eth_fg *cur_fg, struct mbuf *pkt, struct ip_hdr *hdr
 	if (!mbuf_enough_space(pkt, hdr, sizeof(struct ip_hdr)))
 		goto out;
 	/* check for IP version 4 */
-	if (hdr->version != 4)
+	if (hdr->version != 4) {
 		goto out;
+	}
 	/* the minimum legal IPv4 header length is 20 bytes (5 words) */
-	if (hdr->header_len < 5)
+	if (hdr->header_len < 5) {
 		goto out;
+	}
 
 	/* drop all IP fragment packets (unsupported) */
-	if (ntoh16(hdr->off) & (IP_OFFMASK | IP_MF))
+	if (ntoh16(hdr->off) & (IP_OFFMASK | IP_MF)) {
 		goto out;
+	}
 
 	hdrlen = hdr->header_len * sizeof(uint32_t);
 	pktlen = ntoh16(hdr->len);
 
 	/* the ip total length must be large enough to hold the header */
-	if (pktlen < hdrlen)
+	if (pktlen < hdrlen) {
 		goto out;
+	}
 	if (!mbuf_enough_space(pkt, hdr, pktlen))
 		goto out;
 
@@ -125,24 +133,51 @@ static void ip_input(struct eth_fg *cur_fg, struct mbuf *pkt, struct ip_hdr *hdr
 		/* FIXME: change when we integrate better with LWIP */
 		tcp_input_tmp(cur_fg, pkt, hdr, mbuf_nextd_off(hdr, void *, hdrlen));
 		break;
-	case IPPROTO_UDP:
-		udp_input(pkt, hdr,
-			  mbuf_nextd_off(hdr, struct udp_hdr *, hdrlen));
 		break;
 	case IPPROTO_ICMP:
-		icmp_input(cur_fg, pkt,
+		icmp_input(cur_fg, pkt,										
 			   mbuf_nextd_off(hdr, struct icmp_hdr *, hdrlen),
 			   pktlen);
 		break;
-	default:
+	default: 
 		goto out;
 	}
 
 	return;
 
 out:
-	mbuf_free(pkt);
+	rte_pktmbuf_free(pkt);
 }
+
+void eth_input_process(struct rte_mbuf *pkt, int nb_pkts){
+
+	struct eth_hdr *ethhdr = rte_pktmbuf_mtod(pkt, struct eth_hdr *);
+	struct eth_fg *fg;
+
+	//set_current_queue(rx_queue);
+	//fg = fgs[pkt->fg_id];
+	fg = fgs[percpu_get(cpu_id)]; //FIXME: figure out flow group stuff
+	eth_fg_set_current(fg);
+
+	log_debug("ip: got ethernet packet of len %ld, type %x\n",
+		  pkt->buf_len, ntoh16(ethhdr->type));
+
+	if (ethhdr->type == hton16(ETHTYPE_IP)){
+		ip_input(fg, pkt, mbuf_nextd(ethhdr, struct ip_hdr *));
+	}
+	else if (ethhdr->type == hton16(ETHTYPE_ARP)){
+		arp_input(pkt, mbuf_nextd(ethhdr, struct arp_hdr *));
+	}
+	else {
+		rte_pktmbuf_free(pkt); 
+	}
+
+//	unset_current_queue();
+	unset_current_fg();
+	
+
+}
+
 
 /**
  * eth_input - process an ethernet packet
@@ -150,6 +185,7 @@ out:
  */
 void eth_input(struct eth_rx_queue *rx_queue, struct mbuf *pkt)
 {
+	/*
 	struct eth_hdr *ethhdr = mbuf_mtod(pkt, struct eth_hdr *);
 	struct eth_fg *fg;
 
@@ -169,6 +205,8 @@ void eth_input(struct eth_rx_queue *rx_queue, struct mbuf *pkt)
 
 //	unset_current_queue();
 	unset_current_fg();
+
+	*/
 }
 
 /* FIXME: change when we integrate better with LWIP */
@@ -177,7 +215,7 @@ int ip_output_hinted(struct eth_fg *cur_fg, struct pbuf *p, struct ip_addr *src,
 		     uint8_t ttl, uint8_t tos, uint8_t proto, uint8_t *dst_eth_addr)
 {
 	int ret;
-	struct mbuf *pkt;
+	struct rte_mbuf *pkt;
 	struct eth_hdr *ethhdr;
 	struct ip_hdr *iphdr;
 	unsigned char *payload;
@@ -185,7 +223,7 @@ int ip_output_hinted(struct eth_fg *cur_fg, struct pbuf *p, struct ip_addr *src,
 	struct ip_addr dst_addr;
 
 	pkt = mbuf_alloc_local();
-	if (unlikely(!pkt))
+	if (unlikely(!(pkt)))
 		return -ENOMEM;
 
 	ethhdr = mbuf_mtod(pkt, struct eth_hdr *);
@@ -207,6 +245,11 @@ int ip_output_hinted(struct eth_fg *cur_fg, struct pbuf *p, struct ip_addr *src,
 	/* Offload IP and TCP tx checksums */
 	pkt->ol_flags = PKT_TX_IP_CKSUM;
 	pkt->ol_flags |= PKT_TX_TCP_CKSUM;
+	pkt->ol_flags |= PKT_TX_IPV4;
+
+	pkt->l2_len = sizeof (struct eth_hdr);
+	pkt->l3_len = sizeof (struct ip_hdr);
+
 
 	ret = ip_send_one(cur_fg, &dst_addr, pkt, sizeof(struct eth_hdr) +
 			  sizeof(struct ip_hdr) + p->tot_len);
@@ -218,14 +261,14 @@ int ip_output_hinted(struct eth_fg *cur_fg, struct pbuf *p, struct ip_addr *src,
 	return 0;
 }
 
-int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct mbuf *pkt, size_t len)
+int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct rte_mbuf *pkt, size_t len)
 {
 	int ret;
 	struct eth_hdr *ethhdr;
 	struct eth_tx_queue *txq;
 	struct ip_addr dst_addr_;
 
-	ethhdr = mbuf_mtod(pkt, struct eth_hdr *);
+	ethhdr = rte_pktmbuf_mtod(pkt, struct eth_hdr *);
 	ethhdr->shost = CFG.mac;
 	ethhdr->type = hton16(ETHTYPE_IP);
 
@@ -242,9 +285,13 @@ int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct mbuf *pk
 
 	txq = percpu_get(eth_txqs)[cur_fg->dev_idx];
 
-	ret = eth_send_one(txq, pkt, len);
-	if (unlikely(ret)) {
-		mbuf_free(pkt);
+	//ret = eth_send_one(txq, pkt, len); //FIXME: bring this back
+	pkt->data_len = len; // rte_pktmbuf_pkt_len(pkt);
+	pkt->pkt_len = len; // rte_pktmbuf_pkt_len(pkt);
+	ret = rte_eth_tx_burst(0, percpu_get(cpu_id), &pkt, 1);
+	if (unlikely(ret < 1)) {
+		printf("ip_send_one: tx ret is %d\n", ret);
+		rte_pktmbuf_free(pkt);
 		return -EIO;
 	}
 

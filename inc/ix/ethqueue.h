@@ -58,6 +58,9 @@
 
 #pragma once
 
+#include <rte_per_lcore.h>
+#include <rte_ethdev.h>
+
 #include <ix/cpu.h>
 #include <ix/mbuf.h>
 #include <ix/errno.h>
@@ -89,7 +92,8 @@ struct eth_rx_queue {
 	/* a bitmap of flow groups directed to this queue */
 	DEFINE_BITMAP(assigned_fgs, ETH_MAX_NUM_FG);
 
-	struct ix_rte_eth_dev *dev;
+	//struct ix_rte_eth_dev *dev;
+	struct rte_eth_dev *dev;
 };
 
 /**
@@ -114,6 +118,8 @@ static inline int eth_rx_poll(struct eth_rx_queue *rx)
  */
 static inline int eth_recv(struct eth_rx_queue *rxq, struct mbuf *mbuf)
 {
+	// TODO: Need to figure out why fg_transition is dropping packet
+	// fg->cur_cpu is not being set properly. Probably something with initialization...
 	if (eth_recv_handle_fg_transition(rxq, mbuf))
 		return 0;
 
@@ -209,15 +215,17 @@ static inline int eth_send(struct eth_tx_queue *txq, struct mbuf *mbuf)
  */
 static inline int eth_send_one(struct eth_tx_queue *txq, struct mbuf *mbuf, size_t len)
 {
-	mbuf->len = len;
+	mbuf->dpdk_mbuf->pkt_len = len;
+	mbuf->dpdk_mbuf->data_len = len;
+	
 	mbuf->nr_iov = 0;
 
 	return eth_send(txq, mbuf);
 }
 
-DECLARE_PERCPU(int, eth_num_queues);
-DECLARE_PERCPU(struct eth_rx_queue *, eth_rxqs[]);
-DECLARE_PERCPU(struct eth_tx_queue *, eth_txqs[]);
+RTE_DECLARE_PER_LCORE(int, eth_num_queues);
+RTE_DECLARE_PER_LCORE(struct eth_rx_queue *, eth_rxqs[]);
+RTE_DECLARE_PER_LCORE(struct eth_tx_queue *, eth_txqs[]);
 
 extern int eth_process_poll(void);
 extern int eth_process_recv(void);

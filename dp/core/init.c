@@ -56,6 +56,12 @@
  * init.c - initialization
  */
 
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_launch.h>
+#include <rte_atomic.h>
+#include <rte_ethdev.h>
+
 #include <pthread.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -63,7 +69,7 @@
 #include <ix/stddef.h>
 #include <ix/log.h>
 #include <ix/errno.h>
-#include <ix/pci.h>
+//#include <ix/pci.h>
 #include <ix/ethdev.h>
 #include <ix/timer.h>
 #include <ix/cpu.h>
@@ -76,9 +82,11 @@
 #include <ix/control_plane.h>
 #include <ix/log.h>
 
+#include <ix/dpdk.h>
+
 #include <net/ip.h>
 
-#include <dune.h>
+#include "reflex.h"
 
 #include <lwip/memp.h>
 
@@ -86,11 +94,9 @@
 #define ENERGY_UNIT_MASK 0x1F00
 #define ENERGY_UNIT_OFFSET 0x08
 
-static int init_dune(void);
 static int init_cfg(void);
 static int init_firstcpu(void);
 static int init_hw(void);
-static int init_network_cpu(void);
 static int init_ethdev(void);
 
 extern int init_nvmedev(void);
@@ -102,8 +108,6 @@ extern int net_init(void);
 extern int tcp_api_init(void);
 extern int tcp_api_init_cpu(void);
 extern int tcp_api_init_fg(void);
-extern int ixgbe_init(struct pci_dev *pci_dev,
-		      struct ix_rte_eth_dev **ethp);
 extern int sandbox_init(int argc, char *argv[]);
 extern void tcp_init(struct eth_fg *);
 extern int cp_init(void);
@@ -121,13 +125,13 @@ struct init_vector_t {
 
 
 static struct init_vector_t init_tbl[] = {
+	{ "dpdk",    dpdk_init,    NULL, NULL},
 	{ "CPU",     cpu_init,     NULL, NULL},
-	{ "Dune",    init_dune,    NULL, NULL},
+	//{ "Dune",    init_dune,    NULL, NULL},
 	{ "timer",   timer_init,   timer_init_cpu, NULL},
 	{ "net",     net_init,     NULL, NULL},
 	{ "cfg",     init_cfg,     NULL, NULL},              // after net
 	{ "cp",      cp_init,      NULL, NULL},
-	{ "dpdk",    dpdk_init,    NULL, NULL},
 	{ "firstcpu", init_firstcpu, NULL, NULL},             // after cfg
 	{ "mbuf",    mbuf_init,    mbuf_init_cpu, NULL},      // after firstcpu
 	{ "memp",    memp_init,    memp_init_cpu, NULL},
@@ -142,7 +146,6 @@ static struct init_vector_t init_tbl[] = {
 #ifdef ENABLE_KSTATS
 	{ "kstats",  NULL,         kstats_init_cpu, NULL},    // after timer
 #endif
-	{ "init-net", NULL,         init_network_cpu, NULL},  // FIXME should be split
 	{ NULL, NULL, NULL, NULL}
 };
 
@@ -153,31 +156,34 @@ static int args_parsed;
 
 volatile int uaccess_fault;
 
-static void
-pgflt_handler(uintptr_t addr, uint64_t fec, struct dune_tf *tf)
-{
-	int ret;
-	ptent_t *pte;
-	bool was_user = (tf->cs & 0x3);
 
-	if (was_user) {
-		printf("sandbox: got unexpected G3 page fault"
-		       " at addr %lx, fec %lx\n", addr, fec);
-		dune_dump_trap_frame(tf);
-		dune_ret_from_user(-EFAULT);
-	} else {
-		ret = dune_vm_lookup(pgroot, (void *) addr,
-				     CREATE_NORMAL, &pte);
-		assert(!ret);
-		*pte = PTE_P | PTE_W | PTE_ADDR(dune_va_to_pa((void *) addr));
-	}
-}
+static struct rte_eth_conf default_eth_conf = {
+	.rxmode = {
+		.max_rx_pkt_len = 9000, /**< use this for jumbo frame */
+		.split_hdr_size = 0,
+		.header_split   = 0, /**< Header Split disabled */
+		.hw_ip_checksum = 1, /**< IP checksum offload disabled */
+		.hw_vlan_filter = 0, /**< VLAN filtering disabled */
+		.jumbo_frame    = 1, /**< Jumbo Frame Support disabled */
+		.hw_strip_crc   = 1, /**< CRC stripped by hardware */
+		.mq_mode        = ETH_MQ_RX_RSS,
+	},
+	.rx_adv_conf = {
+		.rss_conf = {
+			.rss_hf = ETH_RSS_NONFRAG_IPV4_TCP | ETH_RSS_NONFRAG_IPV4_UDP,
+		},
+	},
+	.txmode = {
+		.mq_mode = ETH_MQ_TX_NONE,
+	},
+	.fdir_conf = {
+		.mode = RTE_FDIR_MODE_PERFECT, 
+		.pballoc = RTE_FDIR_PBALLOC_256K,
+	},
+};
 
 /**
  * init_ethdev - initializes an ethernet device
- * @pci_addr: the PCI address of the device
- *
- * FIXME: For now this is IXGBE-specific.
  *
  * Returns 0 if successful, otherwise fail.
  */
@@ -185,83 +191,130 @@ static int init_ethdev(void)
 {
 	int ret;
 	int i;
-	for (i = 0; i < CFG.num_ethdev; i++) {
-		const struct pci_addr *addr = &CFG.ethdev[i];
-		struct pci_dev *dev;
-		struct ix_rte_eth_dev *eth;
 
-		dev = pci_alloc_dev(addr);
-		if (!dev)
-			return -ENOMEM;
+	// DPDK init for pci ethdev already done in dpdk_init()
+	uint8_t port_id;
 
-		ret = pci_enable_device(dev);
-		if (ret) {
-			log_err("init: failed to enable PCI device\n");
-			free(dev);
-			goto err;
+	// Allocate 1 RX and 1 TX queue per CPU core
+	uint16_t nb_rx_q = CFG.num_cpus; 
+	uint16_t nb_tx_q = CFG.num_cpus;
+	//struct rte_eth_conf conf;
+	struct rte_eth_conf *dev_conf; // = &conf;
+
+	//FIXME: figure out device config for fdir....
+	//memset(dev_conf, 0, sizeof(struct rte_eth_conf));
+	
+	//(void)(memcpy(dev_conf, &default_eth_conf, sizeof(default_eth_conf)));
+	//memcpy(&conf.rxmode, &default_eth_conf.rxmode, sizeof(default_eth_conf.rxmode));
+	//memcpy(&conf.txmode, &default_eth_conf.txmode, sizeof(default_eth_conf.txmode));
+	//memcpy(&conf.fdir_conf, &default_eth_conf.fdir_conf, sizeof(default_eth_conf.fdir_conf));
+	//memcpy(&conf.rx_adv_conf, &default_eth_conf.rx_adv_conf, sizeof(default_eth_conf.rx_adv_conf));
+/*	
+	dev_conf->rxmode.max_rx_pkt_len = 9000; 
+	dev_conf->rxmode.split_hdr_size = 0;
+	dev_conf->rxmode.header_split   = 0; 
+	dev_conf->rxmode.hw_ip_checksum = 1; 
+	dev_conf->rxmode.hw_vlan_filter = 0; 
+	dev_conf->rxmode.jumbo_frame    = 1; 
+	dev_conf->rxmode.hw_strip_crc   = 1; 
+	dev_conf->rxmode.mq_mode        = ETH_MQ_RX_RSS,
+	dev_conf->rx_adv_conf.rss_conf.rss_hf = ETH_RSS_NONFRAG_IPV4_TCP | ETH_RSS_NONFRAG_IPV4_UDP;
+	dev_conf->txmode.mq_mode = ETH_MQ_TX_NONE;
+*/	
+	dev_conf = &default_eth_conf;
+
+	uint8_t nb_ports;
+	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; //4096
+	uint16_t nb_rx_desc = ETH_DEV_RX_QUEUE_SZ; //512
+	struct rte_eth_dev_info dev_info;
+	struct rte_eth_txconf txconf = dev_info.default_txconf; //FIXME: ?? should be after dev_info_get?
+	struct rte_eth_rxconf rxconf = dev_info.default_rxconf; //FIXME: ?? shoudl be after dev_info_get?
+
+
+	nb_ports = rte_eth_dev_count();
+	if (nb_ports == 0)
+		rte_exit(EXIT_FAILURE, "No Ethernet ports - exiting\n");
+
+	if (nb_ports > RTE_MAX_ETHPORTS)
+		nb_ports = RTE_MAX_ETHPORTS;
+
+	dev_conf->fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
+	dev_conf->fdir_conf.pballoc = RTE_FDIR_PBALLOC_256K;
+	dev_conf->fdir_conf.status = RTE_FDIR_REPORT_STATUS;
+
+	dev_conf->fdir_conf.mask.vlan_tci_mask = 0x0;
+	dev_conf->fdir_conf.mask.ipv4_mask.src_ip = 0xFFFFFFFF;
+	dev_conf->fdir_conf.mask.ipv4_mask.dst_ip = 0xFFFFFFFF;
+	dev_conf->fdir_conf.mask.src_port_mask = 0; //don't take into account src_port
+	dev_conf->fdir_conf.mask.dst_port_mask = 0xFFFF;
+
+	dev_conf->fdir_conf.mask.mac_addr_byte_mask = 0;
+	dev_conf->fdir_conf.mask.tunnel_type_mask = 0;
+	dev_conf->fdir_conf.mask.tunnel_id_mask = 0;
+	dev_conf->fdir_conf.drop_queue = 127;
+	dev_conf->fdir_conf.flex_conf.nb_payloads = 0;
+	dev_conf->fdir_conf.flex_conf.nb_flexmasks = 0;
+
+	for (port_id = 0; port_id < nb_ports; port_id++) {		
+		rte_eth_dev_info_get(port_id, &dev_info);
+		//txconf = &dev_info.default_txconf;  //FIXME: this should go here but causes TCP rx bug
+		//rxconf = &dev_info.default_rxconf;
+		ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, dev_conf);
+		if (ret < 0) {
+			rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
+						 ret, (unsigned) port_id);
 		}
 
-		ret = pci_set_master(dev);
-		if (ret) {
-			log_err("init: failed to set master (WARNING)\n");
-			//free(dev);
-			//goto err;
+	
+		// initialize one queue per cpu
+		for (i = 0; i < CFG.num_cpus; i++) {
+			ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), &txconf);
+			if (ret < 0) {
+				rte_exit(EXIT_FAILURE, "rte_eth_tx_queue_setup:err=%d, port=%u\n",
+						 ret, (unsigned) port_id);
+			}
+			rte_eth_rx_queue_setup(port_id, i, nb_rx_desc, rte_eth_dev_socket_id(port_id), &rxconf, dpdk_pool);
+			if (ret <0 ) {
+				rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
+						 ret, (unsigned) port_id);
+			}
+		}
+		
+		ret = rte_eth_dev_start(port_id);
+		if (ret < 0) {
+			printf("ERROR starting device at port %d\n", port_id);
+		}
+		else {
+			printf("started device at port %d\n", port_id);
+		}
+		
+		struct rte_eth_link	link;
+		rte_eth_link_get(port_id, &link);
+
+		if (!link.link_status) {
+			log_warn("eth:\tlink appears to be down, check connection.\n");
+		} else {
+			printf("eth:\tlink up - speed %u Mbps, %s\n",
+				   (uint32_t) link.link_speed,
+				   (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
+				   ("full-duplex") : ("half-duplex\n"));
 		}
 
-		ret = ixgbe_init(dev, &eth);
-		if (ret) {
-			log_err("init: failed to start driver\n");
-			free(dev);
-			goto err;
-		}
+		rte_eth_promiscuous_enable(port_id);
 
-		ret = eth_dev_add(eth);
-		if (ret) {
-			log_err("init: unable to add ethernet device\n");
-			eth_dev_destroy(eth);
-			goto err;
-		}
 	}
+	
+	struct ether_addr mac_addr;
+	rte_eth_macaddr_get(0, &mac_addr);
+	struct eth_addr* macaddr = &mac_addr;
+	CFG.mac = *macaddr;
+
+	percpu_get(eth_num_queues) = nb_rx_q; //NOTE: assume num tx queues == num rx queues
+	parse_fdir();
 	return 0;
 
 err:
 	return ret;
-}
-
-static DEFINE_SPINLOCK(assign_lock);
-
-static int init_network_cpu(void)
-{
-	int ret, i;
-	spin_lock(&assign_lock);
-	ret = 0;
-	for (i = 0; i < eth_dev_count; i++) {
-		struct ix_rte_eth_dev *eth = eth_dev[i];
-		ret = eth_dev_get_rx_queue(eth, &percpu_get(eth_rxqs[i]));
-		if (ret) {
-			spin_unlock(&assign_lock);
-			return ret;
-		}
-
-		ret = eth_dev_get_tx_queue(eth, &percpu_get(eth_txqs[i]));
-		if (ret) {
-			spin_unlock(&assign_lock);
-			return ret;
-		}
-	}
-	spin_unlock(&assign_lock);
-
-	percpu_get(eth_num_queues) = eth_dev_count;
-
-
-#if 0	/* initialize perqueue data structures */
-	for_each_queue(idx) {
-		perqueue_get(eth_txq) = percpu_get(eth_txqs[idx]);
-	}
-#endif
-
-
-	return 0;
 }
 
 /**
@@ -287,7 +340,7 @@ static int init_create_cpu(unsigned int cpu, int first)
 	for (i = 0; init_tbl[i].name; i++)
 		if (init_tbl[i].fcpu) {
 			ret = init_tbl[i].fcpu();
-			log_info("init: module %-10s on %d: %s \n", init_tbl[i].name, percpu_get(cpu_id), (ret ? "FAILURE" : "SUCCESS"));
+			log_info("init: module %-10s on %d: %s \n", init_tbl[i].name, RTE_PER_LCORE(cpu_id), (ret ? "FAILURE" : "SUCCESS"));
 			if (ret)
 				panic("could not initialize IX\n");
 		}
@@ -324,8 +377,9 @@ static void wait_for_spawn(void)
 	arg = req->arg;
 	free(req);
 
-	log_info("init: user spawned cpu %d\n", percpu_get(cpu_id));
-	pthread_entry(arg);
+	log_info("init: user spawned cpu %d\n", RTE_PER_LCORE(cpu_id));
+	//pthread_entry(arg);
+	//pp_main(NULL);
 }
 
 int init_do_spawn(void *arg)
@@ -354,18 +408,18 @@ static int init_fg_cpu(void)
 	int start;
 	DEFINE_BITMAP(fg_bitmap, ETH_MAX_TOTAL_FG);
 
-	start = percpu_get(cpu_nr);
+	start = RTE_PER_LCORE(cpu_nr);
 
 	bitmap_init(fg_bitmap, ETH_MAX_TOTAL_FG, 0);
 	for (fg_id = start; fg_id < nr_flow_groups; fg_id += CFG.num_cpus)
 		bitmap_set(fg_bitmap, fg_id);
 
-	eth_fg_assign_to_cpu(fg_bitmap, percpu_get(cpu_nr));
+	eth_fg_assign_to_cpu(fg_bitmap, RTE_PER_LCORE(cpu_nr));
 
 	for (fg_id = start; fg_id < nr_flow_groups; fg_id += CFG.num_cpus) {
 		eth_fg_set_current(fgs[fg_id]);
 
-		assert(fgs[fg_id]->cur_cpu == percpu_get(cpu_id));
+		assert(fgs[fg_id]->cur_cpu == RTE_PER_LCORE(cpu_id));
 
 		tcp_init(fgs[fg_id]);
 		ret = tcp_api_init_fg();
@@ -379,14 +433,17 @@ static int init_fg_cpu(void)
 
 	unset_current_fg();
 
-	fg_id = outbound_fg_idx();
+	//FIXME: figure out flow group stuff, this is temp fix for fg_id == cpu_id (no migration)
+	fg_id = percpu_get(cpu_id); 
+	//fg_id = outbound_fg_idx();
+	fgs[fg_id] = malloc(sizeof(struct eth_fg));
 	fgs[fg_id] = malloc(sizeof(struct eth_fg));
 	memset(fgs[fg_id], 0, sizeof(struct eth_fg));
 	eth_fg_init(fgs[fg_id], fg_id);
 	eth_fg_init_cpu(fgs[fg_id]);
-	fgs[fg_id]->cur_cpu = percpu_get(cpu_id);
+	fgs[fg_id]->cur_cpu = RTE_PER_LCORE(cpu_id);
 	fgs[fg_id]->fg_id = fg_id;
-	fgs[fg_id]->eth = percpu_get(eth_rxqs[0])->dev;
+	//fgs[fg_id]->eth = percpu_get(eth_rxqs[0])->dev;
 	tcp_init(fgs[fg_id]);
 
 	return 0;
@@ -397,10 +454,10 @@ static volatile int started_cpus;
 
 void *start_cpu(void *arg)
 {
+	log_info("start_cpu\n");
 	int ret;
 	unsigned int cpu_nr_ = (unsigned int)(unsigned long) arg;
 	unsigned int cpu = CFG.cpu[cpu_nr_];
-
 
 	ret = init_create_cpu(cpu, 0);
 	if (ret) {
@@ -412,25 +469,36 @@ void *start_cpu(void *arg)
 
 	/* percpu_get(cp_cmd) of the first CPU is initialized in init_hw. */
 
-	percpu_get(cpu_nr) = cpu_nr_;
+	RTE_PER_LCORE(cpu_nr) = cpu_nr_;
 	percpu_get(cp_cmd) = &cp_shmem->command[started_cpus];
 	percpu_get(cp_cmd)->cpu_state = CP_CPU_STATE_RUNNING;
 
-	pthread_barrier_wait(&start_barrier);
+	//pthread_barrier_wait(&start_barrier);
+	rte_smp_mb(); 
 
+	//log_info("skipping fg init for now.....\n");
+	
 	ret = init_fg_cpu();
 	if (ret) {
 		log_err("init: failed to initialize flow groups\n");
 		exit(ret);
 	}
-
-	wait_for_spawn();
+	
 
 	return NULL;
 }
 
+
 static int init_hw(void)
 {
+	// If we are not on the master lcore, we don't spawn new threads
+	int master_id = rte_get_master_lcore();
+	int lcore_id = rte_lcore_id();
+	
+	if (master_id != lcore_id)
+		return 0;
+
+
 	int i, ret = 0;
 	pthread_t tid;
 	int j;
@@ -443,20 +511,27 @@ static int init_hw(void)
 		return ret;
 	}
 
-	percpu_get(cpu_nr) = 0;
+	log_info("created cpu\n");
+
+	RTE_PER_LCORE(cpu_nr) = 0;
 	percpu_get(cp_cmd) = &cp_shmem->command[0];
 	percpu_get(cp_cmd)->cpu_state = CP_CPU_STATE_RUNNING;
 
 	for (i = 1; i < CFG.num_cpus; i++) {
-		ret = pthread_create(&tid, NULL, start_cpu, (void *)(unsigned long) i);
+		//ret = pthread_create(&tid, NULL, start_cpu, (void *)(unsigned long) i);
+		log_info("rte_eal_remote_launch...start_cpu\n");
+		ret = rte_eal_remote_launch(start_cpu, (void *)(unsigned long) i, i);		
+
 		if (ret) {
-			log_err("init: unable to create pthread\n");
+			log_err("init: unable to create lthread\n");
 			return -EAGAIN;
 		}
 		while (started_cpus != i)
 			usleep(100);
 	}
 
+
+	/*
 	fg_id = 0;
 	for (i = 0; i < CFG.num_ethdev; i++) {
 		struct ix_rte_eth_dev *eth = eth_dev[i];
@@ -464,7 +539,7 @@ static int init_hw(void)
 		if (!eth->data->nb_rx_queues)
 			continue;
 
-		ret = eth_dev_start(eth);
+		ret = eth_dev_start(eth); 
 		if (ret) {
 			log_err("init: failed to start eth%d\n", i);
 			return ret;
@@ -478,15 +553,22 @@ static int init_hw(void)
 			fg_id++;
 		}
 	}
+	*/
 
 	nr_flow_groups = fg_id;
 	cp_shmem->nr_flow_groups = nr_flow_groups;
 
 	mempool_init();
 
+
 	if (CFG.num_cpus > 1) {
-		pthread_barrier_wait(&start_barrier);
+		//pthread_barrier_wait(&start_barrier);
+		//rte_smp_mb();
+		rte_eal_mp_wait_lcore();
+
 	}
+
+	log_info("skipping init_fg_cpu for now...\n");
 
 	init_fg_cpu();
 	if (ret) {
@@ -499,14 +581,6 @@ static int init_hw(void)
 	return 0;
 }
 
-static int init_dune(void)
-{
-	int ret = dune_init(false);
-	if (ret)
-		return ret;
-	dune_register_pgflt_handler(pgflt_handler);
-	return ret;
-}
 
 static int init_cfg(void)
 {
@@ -530,15 +604,19 @@ static int init_firstcpu(void)
 	for (i = 0; i < CFG.num_cpus; i++)
 		cp_shmem->cpu[i] = CFG.cpu[i];
 
+
 	ret = cpu_init_one(CFG.cpu[0]);
 	if (ret) {
 		log_err("init: failed to initialize CPU 0\n");
 		return ret;
 	}
-
+	// TODO: Need to figure out how to replace this calculation
+	/*
 	msr_val = rdmsr(MSR_RAPL_POWER_UNIT);
+	
 	value = (msr_val & ENERGY_UNIT_MASK) >> ENERGY_UNIT_OFFSET;
 	energy_unit = 1.0 / (1 << value);
+	*/
 
 	return ret;
 }
@@ -561,9 +639,11 @@ int main(int argc, char *argv[])
 				panic("could not initialize IX\n");
 		}
 
-	ret = sandbox_init(argc - args_parsed, &argv[args_parsed]);
+	//ret = echoserver_main(argc - args_parsed, &argv[args_parsed]);
+	ret = reflex_server_main(argc - args_parsed, &argv[args_parsed]);
 	if (ret) {
-		log_err("init: failed to start sandbox\n");
+		//log_err("init: failed to start echoserver\n");
+		log_err("init: failed to start reflex server\n");
 		return ret;
 	}
 

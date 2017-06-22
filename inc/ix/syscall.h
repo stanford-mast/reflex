@@ -57,6 +57,7 @@
  */
 
 #pragma once
+#include <rte_per_lcore.h>
 
 #include <ix/compiler.h>
 #include <ix/types.h>
@@ -507,10 +508,9 @@ enum {
 	USYS_NR,
 };
 
-#ifdef __KERNEL__
 
-DECLARE_PERCPU(struct bsys_arr *, usys_arr);
-DECLARE_PERCPU(unsigned long, syscall_cookie);
+RTE_DECLARE_PER_LCORE(struct bsys_arr *, usys_arr);
+RTE_DECLARE_PER_LCORE(unsigned long, syscall_cookie);
 
 /**
  * usys_reset - reset the batched call array
@@ -722,6 +722,14 @@ usys_timer(unsigned long cookie)
 	BSYS_DESC_1ARG(d, USYS_TIMER, cookie);
 }
 
+static inline void sys_test_ix()
+{
+	log_info("\n************************PRINTITNG FROM SYS TEST**********************\n");
+}
+
+int sys_bpoll(struct bsys_desc *d, unsigned int nr);
+void *sys_baddr(void);
+
 /*
  * Kernel system call definitions
  */
@@ -770,5 +778,4 @@ extern void do_syscall(struct dune_tf *tf, uint64_t sysnr);
 extern int syscall_init_cpu(void);
 extern void syscall_exit_cpu(void);
 
-#endif /* __KERNEL__ */
 

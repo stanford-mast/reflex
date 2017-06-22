@@ -58,6 +58,10 @@
 
 #pragma once
 
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_mbuf.h>
+
 #include <ix/types.h>
 #include <ix/mbuf.h>
 #include <ix/ethdev.h>
@@ -69,11 +73,11 @@
 /* Address Resolution Protocol (ARP) definitions */
 extern int arp_lookup_mac(struct ip_addr *addr, struct eth_addr *mac);
 extern int arp_insert(struct ip_addr *addr, struct eth_addr *mac);
-extern void arp_input(struct mbuf *pkt, struct arp_hdr *hdr);
+extern void arp_input(struct rte_mbuf *pkt, struct arp_hdr *hdr);
 extern int arp_init(void);
 
 /* Internet Control Message Protocol (ICMP) definitions */
-extern void icmp_input(struct eth_fg *, struct mbuf *pkt, struct icmp_hdr *hdr, int len);
+extern void icmp_input(struct eth_fg *, struct rte_mbuf *pkt, struct icmp_hdr *hdr, int len);
 
 /* Unreliable Datagram Protocol (UDP) definitions */
 extern void udp_input(struct mbuf *pkt, struct ip_hdr *iphdr,
@@ -81,7 +85,7 @@ extern void udp_input(struct mbuf *pkt, struct ip_hdr *iphdr,
 
 /* Transmission Control Protocol (TCP) definitions */
 /* FIXME: change when we integrate better with LWIP */
-extern void tcp_input_tmp(struct eth_fg *, struct mbuf *pkt, struct ip_hdr *iphdr, void *tcphdr);
+extern void tcp_input_tmp(struct eth_fg *, struct rte_mbuf *pkt, struct ip_hdr *iphdr, void *tcphdr);
 extern int tcp_api_init(void);
 extern int tcp_api_init_fg(void);
 
@@ -110,5 +114,5 @@ static inline void ip_setup_header(struct ip_hdr *iphdr, uint8_t proto,
 	iphdr->dst_addr.addr = hton32(daddr);
 }
 
-int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct mbuf *pkt, size_t len);
-int arp_add_pending_pkt(struct ip_addr *dst_addr, struct eth_fg *fg, struct mbuf *mbuf, size_t len);
+int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct rte_mbuf *pkt, size_t len);
+int arp_add_pending_pkt(struct ip_addr *dst_addr, struct eth_fg *fg, struct rte_mbuf *mbuf, size_t len);

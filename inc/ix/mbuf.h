@@ -57,13 +57,38 @@
  */
 
 #pragma once
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_malloc.h>
+#include <rte_per_lcore.h>
+#include <rte_mempool.h>
+#include <rte_mbuf.h>
 
 #include <ix/stddef.h>
-#include <ix/mem.h>
+//#include <ix/mem.h>
 #include <ix/mempool.h>
 #include <ix/cpu.h>
-#include <ix/page.h>
+//#include <ix/page.h>
 #include <ix/syscall.h>
+
+// Taken from mem.h
+#ifndef MAP_FAILED
+#define MAP_FAILED      ((void *) -1)
+#endif
+
+typedef unsigned long machaddr_t; /* host physical addresses */
+enum {
+	PGSHIFT_4KB = 12,
+	PGSHIFT_2MB = 21,
+	PGSHIFT_1GB = 30,
+};
+
+enum {
+	PGSIZE_4KB = (1 << PGSHIFT_4KB), /* 4096 bytes */
+	PGSIZE_2MB = (1 << PGSHIFT_2MB), /* 2097152 bytes */
+	PGSIZE_1GB = (1 << PGSHIFT_1GB), /* 1073741824 bytes */
+};
+
 
 struct mbuf_iov {
 	void *base;
@@ -78,14 +103,19 @@ struct mbuf_iov {
  *
  * Returns the length of the mbuf IOV (could be less than the sg entry).
  */
+
 static inline size_t
 mbuf_iov_create(struct mbuf_iov *iov, struct sg_entry *ent)
 {
+	
 	size_t len = min(ent->len, PGSIZE_2MB - PGOFF_2MB(ent->base));
 
+	log_info("mbuf_iov_create().....\n");
 	iov->base = ent->base;
-	iov->maddr = page_get(ent->base);
-	iov->len = len;
+	// TODO: Not sure if okay
+	//iov->maddr = page_get(ent->base);
+	iov->maddr = ent->base;
+	iov->len = len;	
 
 	return len;
 }
@@ -94,35 +124,41 @@ mbuf_iov_create(struct mbuf_iov *iov, struct sg_entry *ent)
  * mbuf_iov_free - unreferences the IOV memory
  * @iov: the IOV
  */
+
 static inline void mbuf_iov_free(struct mbuf_iov *iov)
 {
-	page_put(iov->base);
+	// TODO: Maybe something else should be done here
+	//page_put(iov->base);
 }
+
 
 #define MBUF_INVALID_FG_ID 0xFFFF
 
+// NOTE: dpdk_mbuf pointer points to a rte_mbuf
 struct mbuf {
-	size_t len;		/* the length of the mbuf data */
-	struct mbuf *next;	/* the next buffer of the packet
-				 * (can happen with recieve-side coalescing) */
-	struct mbuf_iov *iovs;	/* transmit scatter-gather array */
-	unsigned int nr_iov;	/* the number of scatter-gather vectors */
+	//size_t len;		// the length of the mbuf data
+	struct mbuf *next;	// the next buffer of the packet
+				// (can happen with recieve-side coalescing)
+	struct mbuf_iov *iovs;	// transmit scatter-gather array
+	unsigned int nr_iov;	// the number of scatter-gather vectors
 
-	uint16_t fg_id;		/* the flow group identifier */
-	uint16_t ol_flags;	/* which offloads to enable? */
+	uint16_t fg_id;		// the flow group identifier
+	uint16_t ol_flags;	// which offloads to enable?
 
-	void (*done)(struct mbuf *m);  /* called on free */
-	unsigned long done_data; /* extra data to pass to done() */
-	unsigned long timestamp; /* receive timestamp (in CPU clock ticks) */
+	void (*done)(struct mbuf *m);  // called on free
+	unsigned long done_data; // extra data to pass to done()
+	unsigned long timestamp; // receive timestamp (in CPU clock ticks)
+
+	struct rte_mbuf *dpdk_mbuf;   // rte_mbuf form dpdk
 };
+
 
 #define MBUF_HEADER_LEN		64	/* one cache line */
 #define MBUF_DATA_LEN		9000 /* Originally 2048	(2 KB) but increase for jumbo frame support */
 #define MBUF_LEN		(MBUF_HEADER_LEN + MBUF_DATA_LEN)
 
-/* Offload flag bits */
-#define PKT_TX_IP_CKSUM      0x1000 /**< IP cksum of TX pkt. computed by NIC. */
-#define PKT_TX_TCP_CKSUM     0x2000 /**< TCP cksum of TX pkt. computed by NIC. */
+// Alternative MBUF size for rte_mbufs
+#define DPDK_MBUF_SIZE       (MBUF_DATA_LEN + RTE_PKTMBUF_HEADROOM)
 
 
 /**
@@ -139,8 +175,13 @@ struct mbuf {
  * @mbuf: the mbuf
  * @type: the type to cast
  */
+// Replaced with rte_mbuf function
+/*
 #define mbuf_mtod(mbuf, type) \
 	((type) ((uintptr_t) (mbuf) + MBUF_HEADER_LEN))
+*/
+#define mbuf_mtod(m, type) \
+	((type)((char *)(m)->buf_addr + (m)->data_off + (0)))
 
 /**
  * mbuf_nextd_off - advance a data pointer by an offset
@@ -170,8 +211,10 @@ struct mbuf {
  * Returns true if there is room, otherwise false.
  */
 #define mbuf_enough_space(mbuf, pos, sz) \
-	((uintptr_t) (pos) - ((uintptr_t) (mbuf) + MBUF_HEADER_LEN) + (sz) <= \
-	 (mbuf)->len)
+	((uintptr_t) (pos) - (mbuf_mtod(mbuf, uintptr_t)) + (sz) <= \
+	 rte_pktmbuf_data_len(mbuf))
+	 
+//rte_pktmbuf_data_len(mbuf->dpdk_mbuf))
 
 /**
  * mbuf_to_iomap - determines the address in the IOMAP region
@@ -193,7 +236,7 @@ struct mbuf {
 
 extern void mbuf_default_done(struct mbuf *m);
 
-DECLARE_PERCPU(struct mempool, mbuf_mempool);
+RTE_DECLARE_PER_LCORE(struct mempool, mbuf_mempool);
 
 /**
  * mbuf_alloc - allocate an mbuf from a memory pool
@@ -201,25 +244,44 @@ DECLARE_PERCPU(struct mempool, mbuf_mempool);
  *
  * Returns an mbuf, or NULL if failure.
  */
-static inline struct mbuf *mbuf_alloc(struct mempool *pool)
+static inline struct rte_mbuf *mbuf_alloc(struct mempool *pool, int socket)
 {
-	struct mbuf *m = mempool_alloc(pool);
-	if (unlikely(!m))
+	struct rte_mbuf *dpdk_mbuf = rte_pktmbuf_alloc(pool->datastore->pool);
+	if (unlikely(!dpdk_mbuf))
 		return NULL;
 
-	m->next = NULL;
-	m->done = &mbuf_default_done;
+/*	
+	dpdk_mbuf->data_len = 0;
+	dpdk_mbuf->pkt_len = 0;
+	dpdk_mbuf->next = NULL;
 
-	return m;
+	// TODO: ix_mbuf is allocated on a socket heap. Maybe it should have its own mempool
+	struct mbuf *ix_mbuf = (struct mbuf *) rte_zmalloc_socket(NULL, sizeof(struct mbuf), 0, socket);
+	if (unlikely(!ix_mbuf))
+		return NULL;
+
+	ix_mbuf->next = NULL;
+	ix_mbuf->done = &mbuf_default_done;
+
+	// Assign new rte mbuf to an ix mbuf
+	ix_mbuf->dpdk_mbuf = dpdk_mbuf;
+
+	return ix_mbuf;
+	*/
+	return dpdk_mbuf;
 }
 
 /**
  * mbuf_free - frees an mbuf
  * @m: the mbuf
  */
-static inline void mbuf_free(struct mbuf *m)
+static inline void mbuf_free(struct rte_mbuf *m)
 {
-	mempool_free(&percpu_get(mbuf_mempool), m);
+	// Put rte_mbuf back into mempool
+	//rte_pktmbuf_free(&percpu_get(mbuf_mempool), m->dpdk_mbuf);
+	//rte_pktmbuf_free(m->dpdk_mbuf);
+	rte_pktmbuf_free(m);
+	//rte_free(m);
 }
 
 /**
@@ -228,10 +290,13 @@ static inline void mbuf_free(struct mbuf *m)
  *
  * Returns a machine address.
  */
-static inline machaddr_t mbuf_get_data_machaddr(struct mbuf *m)
+static inline struct rte_mbuf* mbuf_get_data_machaddr(struct rte_mbuf *m)
 {
-	return page_machaddr(mbuf_mtod(m, void *));
+	//return page_machaddr(mbuf_mtod(m, void *));
+	//log_info("****************** mbuf_get_data_machaddr (which doesn't give machaddr anymore)*********** \n");
+	return mbuf_mtod(m, void*);
 }
+
 
 /**
  * mbuf_xmit_done - called when a TX queue completes an mbuf
@@ -247,9 +312,10 @@ static inline void mbuf_xmit_done(struct mbuf *m)
  *
  * Returns an mbuf, or NULL if out of memory.
  */
-static inline struct mbuf *mbuf_alloc_local(void)
+static inline struct rte_mbuf *mbuf_alloc_local(void)
 {
-	return mbuf_alloc(&percpu_get(mbuf_mempool));
+	int socket = rte_socket_id();
+	return mbuf_alloc(&percpu_get(mbuf_mempool), socket);
 }
 
 extern int mbuf_init(void);
@@ -263,4 +329,6 @@ extern void mbuf_exit_cpu(void);
 struct eth_rx_queue;
 
 extern void eth_input(struct eth_rx_queue *rx_queue, struct mbuf *pkt);
+
+extern void eth_input_process(struct rte_mbuf *pkt, int nb_pkts);
 

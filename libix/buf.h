@@ -59,7 +59,7 @@
 #pragma once
 
 #include <ix/stddef.h>
-#include <mempool.h>
+#include <ix/mempool.h>
 
 #include <pthread.h>
 #include <string.h>

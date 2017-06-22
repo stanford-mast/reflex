@@ -56,11 +56,14 @@
  * ethqueue.c - ethernet queue support
  */
 
+#include <rte_per_lcore.h>
 #include <ix/stddef.h>
 #include <ix/kstats.h>
 #include <ix/ethdev.h>
 #include <ix/log.h>
 #include <ix/control_plane.h>
+
+#include <ix/byteorder.h>
 
 /* Accumulate metrics period (in us) */
 #define METRICS_PERIOD_US 10000
@@ -68,14 +71,17 @@
 /* Power measurement period (in us) */
 #define POWER_PERIOD_US 500000
 
+#define MAX_PKT_BURST 64
+
 #define EMA_SMOOTH_FACTOR_0 0.5
 #define EMA_SMOOTH_FACTOR_1 0.25
 #define EMA_SMOOTH_FACTOR_2 0.125
 #define EMA_SMOOTH_FACTOR EMA_SMOOTH_FACTOR_0
+#define MAX_NUM_IO_QUEUES 31
 
-DEFINE_PERCPU(int, eth_num_queues);
-DEFINE_PERCPU(struct eth_rx_queue *, eth_rxqs[NETHDEV]);
-DEFINE_PERCPU(struct eth_tx_queue *, eth_txqs[NETHDEV]);
+RTE_DEFINE_PER_LCORE(int, eth_num_queues);
+RTE_DEFINE_PER_LCORE(struct eth_rx_queue *, eth_rxqs[NETHDEV]);
+RTE_DEFINE_PER_LCORE(struct eth_tx_queue *, eth_txqs[NETHDEV]);
 
 struct metrics_accumulator {
 	long timestamp;
@@ -87,7 +93,7 @@ struct metrics_accumulator {
 	long prv_timestamp;
 };
 
-static DEFINE_PERCPU(struct metrics_accumulator, metrics_acc);
+static RTE_DEFINE_PER_LCORE(struct metrics_accumulator, metrics_acc);
 
 struct power_accumulator {
 	int prv_energy;
@@ -96,9 +102,6 @@ struct power_accumulator {
 
 static struct power_accumulator power_acc;
 
-/* FIXME: convert to per-flowgroup */
-//DEFINE_PERQUEUE(struct eth_tx_queue *, eth_txq);
-
 unsigned int eth_rx_max_batch = 64;
 
 /**
@@ -106,15 +109,35 @@ unsigned int eth_rx_max_batch = 64;
  *
  * Returns the number of new packets received.
  */
-int eth_process_poll(void)
+int eth_process_poll(void) 
 {
-	int i, count = 0;
-	struct eth_rx_queue *rxq;
+	int i, ret = 0;
+	int count = 0; 
+	bool empty;
+	struct rte_mbuf *m;
 
-	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-		rxq = percpu_get(eth_rxqs[i]);
-		count += eth_rx_poll(rxq);
-	}
+	struct rte_mbuf *rx_pkts[MAX_NUM_IO_QUEUES]; //TODO: test with multiqueue (multicore), assumes 1 pkt recv at a time
+
+	/*
+	 * We round robin through each queue one packet at
+	 * a time for fairness, and stop when all queues are
+	 * empty or the batch limit is hit. We're okay with
+	 * going a little over the batch limit if it means
+	 * we're not favoring one queue over another.
+	 */
+	do {
+		empty = true;
+		for (i = 0; i < percpu_get(eth_num_queues); i++) {
+			ret = rte_eth_rx_burst(0, i, &rx_pkts[i], 1); //burst 1 because check queues round-robin 
+			if (ret) {
+				empty = false;
+				m = rx_pkts[i];
+				rte_prefetch0(rte_pktmbuf_mtod(m, void *)); 
+				eth_input_process(rx_pkts[i], ret);
+			}
+			count += ret;
+		}
+	} while (!empty && count < eth_rx_max_batch);
 
 	return count;
 }
@@ -193,25 +216,25 @@ int eth_process_recv(void)
 	this_metrics_acc->prv_timestamp = timestamp;
 	if (timestamp - this_metrics_acc->timestamp > (long) cycles_per_us * METRICS_PERIOD_US) {
 		idle = (double) percpu_get(idle_cycles) / (timestamp - this_metrics_acc->timestamp);
-		EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].idle[0], idle, EMA_SMOOTH_FACTOR_0);
-		EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].idle[1], idle, EMA_SMOOTH_FACTOR_1);
-		EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].idle[2], idle, EMA_SMOOTH_FACTOR_2);
+		EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].idle[0], idle, EMA_SMOOTH_FACTOR_0);
+		EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].idle[1], idle, EMA_SMOOTH_FACTOR_1);
+		EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].idle[2], idle, EMA_SMOOTH_FACTOR_2);
 		if (this_metrics_acc->count) {
 			this_metrics_acc->loop_duration -= percpu_get(idle_cycles);
 			this_metrics_acc->loop_duration /= cycles_per_us;
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].queuing_delay, (double) this_metrics_acc->queuing_delay / this_metrics_acc->count, EMA_SMOOTH_FACTOR);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].batch_size, (double) this_metrics_acc->batch_size / this_metrics_acc->count, EMA_SMOOTH_FACTOR);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].queue_size[0], (double) this_metrics_acc->queue_size / this_metrics_acc->count, EMA_SMOOTH_FACTOR_0);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].queue_size[1], (double) this_metrics_acc->queue_size / this_metrics_acc->count, EMA_SMOOTH_FACTOR_1);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].queue_size[2], (double) this_metrics_acc->queue_size / this_metrics_acc->count, EMA_SMOOTH_FACTOR_2);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].loop_duration, (double) this_metrics_acc->loop_duration / this_metrics_acc->count, EMA_SMOOTH_FACTOR_0);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].queuing_delay, (double) this_metrics_acc->queuing_delay / this_metrics_acc->count, EMA_SMOOTH_FACTOR);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].batch_size, (double) this_metrics_acc->batch_size / this_metrics_acc->count, EMA_SMOOTH_FACTOR);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].queue_size[0], (double) this_metrics_acc->queue_size / this_metrics_acc->count, EMA_SMOOTH_FACTOR_0);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].queue_size[1], (double) this_metrics_acc->queue_size / this_metrics_acc->count, EMA_SMOOTH_FACTOR_1);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].queue_size[2], (double) this_metrics_acc->queue_size / this_metrics_acc->count, EMA_SMOOTH_FACTOR_2);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].loop_duration, (double) this_metrics_acc->loop_duration / this_metrics_acc->count, EMA_SMOOTH_FACTOR_0);
 		} else {
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].queuing_delay, 0, EMA_SMOOTH_FACTOR);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].batch_size, 0, EMA_SMOOTH_FACTOR);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].queue_size[0], 0, EMA_SMOOTH_FACTOR_0);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].queue_size[1], 0, EMA_SMOOTH_FACTOR_1);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].queue_size[2], 0, EMA_SMOOTH_FACTOR_2);
-			EMA_UPDATE(cp_shmem->cpu_metrics[percpu_get(cpu_nr)].loop_duration, 0, EMA_SMOOTH_FACTOR_0);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].queuing_delay, 0, EMA_SMOOTH_FACTOR);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].batch_size, 0, EMA_SMOOTH_FACTOR);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].queue_size[0], 0, EMA_SMOOTH_FACTOR_0);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].queue_size[1], 0, EMA_SMOOTH_FACTOR_1);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].queue_size[2], 0, EMA_SMOOTH_FACTOR_2);
+			EMA_UPDATE(cp_shmem->cpu_metrics[RTE_PER_LCORE(cpu_nr)].loop_duration, 0, EMA_SMOOTH_FACTOR_0);
 		}
 		this_metrics_acc->timestamp = timestamp;
 		percpu_get(idle_cycles) = 0;
@@ -221,7 +244,8 @@ int eth_process_recv(void)
 		this_metrics_acc->queue_size = 0;
 		this_metrics_acc->loop_duration = 0;
 	}
-	/* NOTE: assuming that the first CPU never idles */
+	// NOTE: assuming that the first CPU never idles
+	/* TODO: NOT SUPPORTING ENERGY CHANGES RIGHT NOW
 	if (percpu_get(cpu_nr) == 0 && timestamp - power_acc.prv_timestamp > (long) cycles_per_us * POWER_PERIOD_US) {
 		energy = rdmsr(MSR_PKG_ENERGY_STATUS);
 		if (power_acc.prv_timestamp) {
@@ -235,6 +259,7 @@ int eth_process_recv(void)
 		power_acc.prv_timestamp = timestamp;
 		power_acc.prv_energy = energy;
 	}
+	*/
 
 	KSTATS_PACKETS_INC(count);
 	KSTATS_BATCH_INC(count);
@@ -246,6 +271,8 @@ int eth_process_recv(void)
 	return empty;
 }
 
+RTE_DEFINE_PER_LCORE(struct rte_eth_dev_tx_buffer, tx_buf);
+
 /**
  * eth_process_send - processes packets pending to be sent
  */
@@ -254,7 +281,16 @@ void eth_process_send(void)
 	int i, nr;
 	struct eth_tx_queue *txq;
 
+
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
+		
+		//TODO: eth_process_send: figure out tx_pkts and nb_pkts for rte_eth_tx_burst
+		//rte_eth_tx_burst(uint8_t port_id, uint16_t queue_id,
+		//	 struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
+		//rte_eth_tx_burst(0, i, tx_pkts, nb_pkts );
+		//
+		rte_eth_tx_buffer_flush(0, i, &percpu_get(tx_buf));
+		/*
 		txq = percpu_get(eth_txqs[i]);
 
 		nr = eth_tx_xmit(txq, txq->len, txq->bufs);
@@ -262,6 +298,7 @@ void eth_process_send(void)
 			panic("transmit buffer size mismatch\n");
 
 		txq->len = 0;
+		*/
 	}
 }
 

@@ -58,7 +58,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "syscall.h"
+#include <ix/syscall.h>
 #include "ix.h"
 
 static __thread bsysfn_t usys_tbl[USYS_NR];
@@ -73,6 +73,7 @@ __thread struct bsys_arr *karr;
  */
 int ix_poll(void)
 {
+	
 	int ret;
 
 	ret = sys_bpoll(karr->descs, karr->len);
@@ -80,7 +81,6 @@ int ix_poll(void)
 		printf("libix: encountered a fatal memory fault\n");
 		exit(-1);
 	}
-
 	return uarr->len;
 }
 
@@ -155,13 +155,18 @@ int ix_init(struct ix_ops *ops, int batch_depth)
 		usys_tbl[USYS_TCP_KNOCK] = (bsysfn_t) ix_default_tcp_knock;
 
 	uarr = sys_baddr();
-	if (!uarr)
+	printf("on CPU %d, uarr in ix_init is %p\n", percpu_get(cpu_nr), uarr);
+	if (!uarr){
+		printf("bad uarr\n");
 		return -EFAULT;
+	}
 
 	karr = malloc(sizeof(struct bsys_arr) +
 		      sizeof(struct bsys_desc) * batch_depth);
-	if (!karr)
+	if (!karr){
+		printf("can't karr malloc\n");
 		return -ENOMEM;
+	}
 
 	karr->len = 0;
 	karr->max_len = batch_depth;

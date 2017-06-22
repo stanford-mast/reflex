@@ -54,22 +54,34 @@
 
 /*
  * ethfg.c - Support for flow groups, the basic unit of load balancing
+ *
+ * FIXME: userpsace version of ReFlex currently doesn't support flow group migration
+ *        assume that flow_group id == cpu_id
  */
+
+
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_memzone.h>
+#include <rte_malloc.h>
+#include <rte_lcore.h>
+#include <rte_per_lcore.h>
+
 
 #include <ix/stddef.h>
 #include <ix/ethfg.h>
-#include <ix/mem.h>
 #include <ix/errno.h>
 #include <ix/ethdev.h>
 #include <ix/control_plane.h>
 #include <ix/cfg.h>
+#include <ix/cpu.h>
 
 #define TRANSITION_TIMEOUT (1 * ONE_MS)
 
 extern const char __perfg_start[];
 extern const char __perfg_end[];
 
-DEFINE_PERCPU(void *, fg_offset);
+RTE_DEFINE_PER_LCORE(void *, fg_offset);
 
 int nr_flow_groups;
 
@@ -88,11 +100,12 @@ struct migration_info {
 	DEFINE_BITMAP(fg_bitmap, ETH_MAX_TOTAL_FG);
 };
 
-DEFINE_PERCPU(struct queue, local_mbuf_queue);
-DEFINE_PERCPU(struct queue, remote_mbuf_queue);
-DEFINE_PERCPU(struct hlist_head, remote_timers_list);
-DEFINE_PERCPU(uint64_t, remote_timer_pos);
-DEFINE_PERCPU(struct migration_info, migration_info);
+RTE_DECLARE_PER_LCORE(struct migration_info, migration_info);
+RTE_DEFINE_PER_LCORE(struct queue, local_mbuf_queue);
+RTE_DEFINE_PER_LCORE(struct queue, remote_mbuf_queue);
+RTE_DEFINE_PER_LCORE(struct hlist_head, remote_timers_list);
+RTE_DEFINE_PER_LCORE(uint64_t, remote_timer_pos);
+RTE_DEFINE_PER_LCORE(struct migration_info, migration_info);
 
 static void transition_handler_prev(struct timer *t, struct eth_fg *);
 static void transition_handler_target(void *fg_);
@@ -133,14 +146,10 @@ int eth_fg_init_cpu(struct eth_fg *fg)
 {
 	size_t len = __perfg_end - __perfg_start;
 	char *addr;
-
-	addr = mem_alloc_pages_onnode(div_up(len, PGSIZE_2MB),
-				      PGSIZE_2MB, percpu_get(cpu_numa_node),
-				      MPOL_BIND);
+	addr = rte_zmalloc(NULL, len, 0);
 	if (!addr)
 		return -ENOMEM;
 
-	memset(addr, 0, len);
 	fg->perfg = addr;
 
 	return 0;
@@ -155,7 +164,7 @@ void eth_fg_free(struct eth_fg *fg)
 	size_t len = __perfg_end - __perfg_start;
 
 	if (fg->perfg)
-		mem_free_pages(fg->perfg, div_up(len, PGSIZE_2MB), PGSIZE_2MB);
+		rte_free(fg->perfg);
 }
 
 static int eth_fg_assign_single_to_cpu(int fg_id, int cpu, struct rte_eth_rss_reta *rss_reta, struct ix_rte_eth_dev **eth)
@@ -171,7 +180,7 @@ static int eth_fg_assign_single_to_cpu(int fg_id, int cpu, struct rte_eth_rss_re
 		fg->cur_cpu = CFG.cpu[cpu];
 		ret = 0;
 	} else {
-		assert(fg->cur_cpu == percpu_get(cpu_id));
+		assert(fg->cur_cpu == RTE_PER_LCORE(cpu_id));
 		fg->in_transition = true;
 		fg->prev_cpu = fg->cur_cpu;
 		fg->cur_cpu = -1;
@@ -206,7 +215,7 @@ static void migrate_fdir(struct ix_rte_eth_dev *dev, struct eth_fg *cur_fg,
 	struct tcp_pcb *pcb;
 	struct rte_fdir_filter fdir_ftr;
 
-	assert(cur_fg->cur_cpu == percpu_get(cpu_id));
+	assert(cur_fg->cur_cpu == RTE_PER_LCORE(cpu_id));
 	cur_fg->target_cpu = CFG.cpu[cpu];
 	/* FIXME: implement */
 	/* migrate_pkts_to_remote(cur_fg); */
@@ -247,6 +256,8 @@ static void migrate_fdir(struct ix_rte_eth_dev *dev, struct eth_fg *cur_fg,
  */
 void eth_fg_assign_to_cpu(bitmap_ptr fg_bitmap, int cpu)
 {
+	printf("WARNING: eth_fg_assign_to_cpu not supported!!\n");
+	/*
 	int i, j;
 	struct rte_eth_rss_reta rss_reta[NETHDEV];
 	struct ix_rte_eth_dev *eth[NETHDEV], *first_eth;
@@ -261,9 +272,6 @@ void eth_fg_assign_to_cpu(bitmap_ptr fg_bitmap, int cpu)
 	SCRATCHPAD->backlog_before = count;
 
 	SCRATCHPAD->ts_migration_start = rdtsc();
-
-	assert(percpu_get(migration_info).prev_cpu == -1);
-	assert(percpu_get_remote(migration_info, CFG.cpu[cpu]).prev_cpu == -1);
 
 	bitmap_init(percpu_get(migration_info).fg_bitmap, ETH_MAX_TOTAL_FG, 0);
 
@@ -290,7 +298,10 @@ void eth_fg_assign_to_cpu(bitmap_ptr fg_bitmap, int cpu)
 	}
 
 	count = 0;
-	struct mbuf *pkt = percpu_get_remote(remote_mbuf_queue, CFG.cpu[cpu]).head;
+	*/
+	//FIXME: percpu_remote stuff
+	/*
+	struct mbuf *pkt = percpu_get_remote(per_lcore_remote_mbuf_queue, CFG.cpu[cpu]).head;
 	while (pkt) {
 		pkt = pkt->next;
 		count++;
@@ -300,12 +311,14 @@ void eth_fg_assign_to_cpu(bitmap_ptr fg_bitmap, int cpu)
 	if (!real) {
 		percpu_get(cp_cmd)->status = CP_STATUS_READY;
 	} else {
-		percpu_get(migration_info).prev_cpu = percpu_get(cpu_id);
+		percpu_get(migration_info).prev_cpu = RTE_PER_LCORE(cpu_id);
 		percpu_get(migration_info).target_cpu = CFG.cpu[cpu];
 		timer_add(&percpu_get(migration_info).transition_timeout, NULL, TRANSITION_TIMEOUT);
-		percpu_get_remote(migration_info, CFG.cpu[cpu]) = percpu_get(migration_info);
+		percpu_get_remote(per_lcore_migration_info, CFG.cpu[cpu]) = percpu_get(migration_info);
 	}
-
+	*/
+	
+	/*
 	for (i = 0; i < NETHDEV; i++) {
 		if (eth[i])
 			eth[i]->dev_ops->reta_update(eth[i], &rss_reta[i]);
@@ -314,35 +327,37 @@ void eth_fg_assign_to_cpu(bitmap_ptr fg_bitmap, int cpu)
 	SCRATCHPAD->ts_data_structures_done = rdtsc();
 
 	for (i = 0; i < ETH_MAX_TOTAL_FG; i++)
-		if (fgs[i] && fgs[i]->cur_cpu == percpu_get(cpu_id))
+		if (fgs[i] && fgs[i]->cur_cpu == RTE_PER_LCORE(cpu_id))
 			break;
-
-	/* If the current core has no FG assigned, then migrate flow director
-	 * FGs to the destination core. */
+	*/
+	//FIXME: percpu remote stuff	
+	/*
+	// If the current core has no FG assigned, then migrate flow director
+	// FGs to the destination core.
 	if (i == ETH_MAX_TOTAL_FG) {
 		for (i = 0; i < NCPU; i++) {
 			if (!outbound_fg_remote(i))
 				continue;
 			if (outbound_fg_remote(i)->cur_cpu !=
-			    percpu_get(cpu_id))
+			    RTE_PER_LCORE(cpu_id))
 				continue;
 			migrate_fdir(eth[0], outbound_fg_remote(i), cpu);
 		}
 	}
 
-	/* Try to migrate flow director FGs to the destination core. */
+	// Try to migrate flow director FGs to the destination core.
 	migrate = 0;
 	for (i = 0; i < NCPU; i++) {
-		if (i == percpu_get(cpu_id) || !outbound_fg_remote(i))
+		if (i == RTE_PER_LCORE(cpu_id) || !outbound_fg_remote(i))
 			continue;
-		if (outbound_fg_remote(i)->cur_cpu != percpu_get(cpu_id))
+		if (outbound_fg_remote(i)->cur_cpu != RTE_PER_LCORE(cpu_id))
 			continue;
 		if (!migrate)
 			continue;
 		migrate_fdir(eth[0], outbound_fg_remote(i), cpu);
 		migrate = !migrate;
 	}
-
+	*/
 }
 
 static void transition_handler_prev(struct timer *t, struct eth_fg *cur_fg)
@@ -453,7 +468,8 @@ static void transition_handler_target(void *info_)
 
 	percpu_get(migration_info).prev_cpu = -1;
 	info->prev_cpu = -1;
-	percpu_get_remote(cp_cmd, prev_cpu)->status = CP_STATUS_READY;
+	printf("WARNING: percpu_get_remote not supported\n");
+	percpu_get_remote(per_lcore_cp_cmd, prev_cpu)->status = CP_STATUS_READY;
 }
 
 static void migrate_pkts_to_remote(struct eth_fg *fg)
@@ -461,7 +477,8 @@ static void migrate_pkts_to_remote(struct eth_fg *fg)
 	struct eth_rx_queue *rxq = queue_from_fg(fg);
 	struct mbuf *pkt = rxq->head;
 	struct mbuf **prv = &rxq->head;
-	struct queue *q = &percpu_get_remote(remote_mbuf_queue, fg->target_cpu);
+	printf("WARNING: percpu_get_remote not supported\n");
+	struct queue *q = &percpu_get_remote(per_lcore_remote_mbuf_queue, fg->target_cpu);
 
 	while (pkt) {
 		if (fg->fg_id == pkt->fg_id) {
@@ -499,7 +516,9 @@ void eth_recv_at_prev(struct eth_rx_queue *rx_queue, struct mbuf *pkt)
 	}
 
 	struct eth_fg *fg = fgs[pkt->fg_id];
-	struct queue *q = &percpu_get_remote(remote_mbuf_queue, fg->target_cpu);
+
+	printf("WARNING: percpu_get_remote not supported\n");
+	struct queue *q = &percpu_get_remote(per_lcore_remote_mbuf_queue, fg->target_cpu);
 	enqueue(q, pkt);
 }
 
@@ -531,13 +550,18 @@ int eth_recv_handle_fg_transition(struct eth_rx_queue *rx_queue, struct mbuf *pk
 		pkt->fg_id = outbound_fg_idx();
 	struct eth_fg *fg = fgs[pkt->fg_id];
 
-	if (!fg->in_transition && fg->cur_cpu == percpu_get(cpu_id)) {
+	// TODO: Get rid of this when fg->curr_cpu init is figured out
+	fg->in_transition = false;
+	fg->cur_cpu = percpu_get(cpu_id);
+
+
+	if (!fg->in_transition && fg->cur_cpu == RTE_PER_LCORE(cpu_id)) {
 		/* continue processing */
 		return 0;
-	} else if (fg->in_transition && fg->prev_cpu == percpu_get(cpu_id)) {
+	} else if (fg->in_transition && fg->prev_cpu == RTE_PER_LCORE(cpu_id)) {
 		eth_recv_at_prev(rx_queue, pkt);
 		return 1;
-	} else if (fg->in_transition && fg->target_cpu == percpu_get(cpu_id)) {
+	} else if (fg->in_transition && fg->target_cpu == RTE_PER_LCORE(cpu_id)) {
 		eth_recv_at_target(rx_queue, pkt);
 		return 1;
 	} else {
@@ -551,8 +575,10 @@ int eth_recv_handle_fg_transition(struct eth_rx_queue *rx_queue, struct mbuf *pk
 static void migrate_timers_to_remote(int fg_id)
 {
 	struct eth_fg *fg = fgs[fg_id];
-	struct hlist_head *timers_list = &percpu_get_remote(remote_timers_list, fg->target_cpu);
-	uint64_t *timer_pos = &percpu_get_remote(remote_timer_pos, fg->target_cpu);
+
+	printf("WARNING: percpu_get_remote not supported\n");
+	struct hlist_head *timers_list = &percpu_get_remote(per_lcore_remote_timers_list, fg->target_cpu);
+	uint64_t *timer_pos = &percpu_get_remote(per_lcore_remote_timer_pos, fg->target_cpu);
 	uint8_t fg_vector[ETH_MAX_TOTAL_FG] = {0};
 
 	fg_vector[fg_id] = 1;

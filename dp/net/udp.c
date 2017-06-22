@@ -61,8 +61,6 @@
 #include <ix/errno.h>
 #include <ix/log.h>
 #include <ix/syscall.h>
-#include <ix/uaccess.h>
-#include <ix/vm.h>
 #include <ix/kstats.h>
 #include <ix/cfg.h>
 #include <ix/mempool.h>
@@ -205,15 +203,19 @@ long bsys_udp_send(void __user *__restrict vaddr, size_t len,
 	if (unlikely(len > UDP_MAX_LEN))
 		return -RET_INVAL;
 
+	/*
 	if (unlikely(copy_from_user(id, &tmp, sizeof(struct ip_tuple))))
 		return -RET_FAULT;
+	*/
+	tmp = *id;
 
-	if (unlikely(!uaccess_zc_okay(vaddr, len)))
-		return -RET_FAULT;
+	//if (unlikely(!uaccess_zc_okay(vaddr, len)))
+	//	return -RET_FAULT;
 
-	addr = (void *) vm_lookup_phys(vaddr, PGSIZE_2MB);
-	if (unlikely(!addr))
-		return -RET_FAULT;
+	//addr = (void *) vm_lookup_phys(vaddr, PGSIZE_2MB);
+	//if (unlikely(!addr))
+	//	return -RET_FAULT;
+	addr = vaddr;
 
 	addr = (void *)((uintptr_t) addr + PGOFF_2MB(vaddr));
 
@@ -233,6 +235,7 @@ long bsys_udp_send(void __user *__restrict vaddr, size_t len,
 	 * Handle the case of a crossed page boundary. There
 	 * can only be one because of the MTU size.
 	 */
+	/*
 	BUILD_ASSERT(UDP_MAX_LEN < PGSIZE_2MB);
 	if (ent.len != len) {
 		ent.base = (void *)((uintptr_t) ent.base + len);
@@ -242,6 +245,7 @@ long bsys_udp_send(void __user *__restrict vaddr, size_t len,
 		iovs[1].len = ent.len;
 		pkt->nr_iov = 2;
 	}
+	*/
 
 	pkt->done = &udp_mbuf_done;
 	pkt->done_data = cookie;

@@ -56,6 +56,8 @@
  * control_plane.h - control plane definitions
  */
 
+#include <rte_per_lcore.h>
+
 #include <ix/compiler.h>
 #include <ix/ethfg.h>
 
@@ -138,8 +140,8 @@ extern volatile struct cp_shmem {
 #define SCRATCHPAD (&cp_shmem->scratchpad[cp_shmem->scratchpad_idx])
 #define SCRATCHPAD_NEXT do { assert(++cp_shmem->scratchpad_idx < 1024); } while (0)
 
-DECLARE_PERCPU(volatile struct command_struct *, cp_cmd);
-DECLARE_PERCPU(unsigned long, idle_cycles);
+RTE_DECLARE_PER_LCORE(volatile struct command_struct *, cp_cmd);
+RTE_DECLARE_PER_LCORE(unsigned long, idle_cycles);
 
 void cp_idle(void);
 

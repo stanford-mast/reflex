@@ -65,6 +65,7 @@
 
 #define DEBUG_TIMER
 
+#include <rte_per_lcore.h>
 #include <ix/timer.h>
 #include <ix/errno.h>
 #include <ix/log.h>
@@ -115,7 +116,7 @@ struct timerwheel {
 };
 
 
-static DEFINE_PERCPU(struct timerwheel, timer_wheel_cpu);
+static RTE_DEFINE_PER_LCORE(struct timerwheel, timer_wheel_cpu);
 
 
 int cycles_per_us __aligned(64);
@@ -168,8 +169,9 @@ static void timer_insert(struct eth_fg *cur_fg, struct timerwheel *tw, struct ti
 
 	if (cur_fg)
 		t->fg_id = cur_fg->fg_id;
-	else
+	else{
 		t->fg_id = -1;
+	}
 
 }
 
@@ -255,10 +257,16 @@ static void timer_run_bucket(struct timerwheel *tw, struct hlist_head *h)
 		KSTATS_PUSH(timer_handler, &save);
 		if (t->fg_id >= 0)
 			eth_fg_set_current(fgs[t->fg_id]);
+		else{
+			continue;
+		}
+		//NOTE: if running multi-threaded, need to set flow director settings otherwise may segfault here
+		assert(fgs[t->fg_id]); 
 		t->handler(t, fgs[t->fg_id]);
 		KSTATS_POP(&save);
 	}
 	h->head = NULL;
+
 }
 
 static int timer_reinsert_bucket(struct timerwheel *tw, struct hlist_head *h, uint64_t now_us)

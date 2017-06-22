@@ -29,22 +29,21 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/socket.h>
+#include <rte_per_lcore.h>
+
 #include <ix/cfg.h>
 #include <ix/errno.h>
 #include <ix/log.h>
 #include <ix/syscall.h>
 #include <ix/nvmedev.h>
-#include <ix/page.h>
-#include <ix/vm.h>
 #include <ix/mempool.h>
 #include <ix/nvme_sw_queue.h>
-#include <ix/spdk.h>
+#include "nvme_impl.h"
 #include <ix/atomic.h>
 
 #include <spdk/nvme.h>
-#include <spdk/nvme_spec.h>
 #include <limits.h>
-
 
 static struct spdk_nvme_ctrlr *nvme_ctrlr = NULL;
 static long global_ns_id = 1;
@@ -53,13 +52,11 @@ static long global_ns_sector_size = 1;
 struct pci_dev *g_nvme_dev;
 
 #define MAX_OPEN_BATCH 32 
-#define NUM_NVME_REQUESTS (4096 * 256) 
-#define SGL_PAGE_SIZE 4096 	//should match PAGE_SIZE defined in apps/reflex_server.c
-
-DEFINE_PERCPU(int, open_ev[MAX_OPEN_BATCH]);
-DEFINE_PERCPU(int, open_ev_ptr);
-DEFINE_PERCPU(struct spdk_nvme_qpair *, qpair);
-DEFINE_PERCPU(bool, mempool_initialized);
+#define NUM_NVME_REQUESTS (4096 * 256)//4096 * 64 //1024
+RTE_DEFINE_PER_LCORE(int, open_ev[MAX_OPEN_BATCH]);
+RTE_DEFINE_PER_LCORE(int, open_ev_ptr);
+RTE_DEFINE_PER_LCORE(struct spdk_nvme_qpair *, qpair);
+RTE_DEFINE_PER_LCORE(bool, mempool_initialized);
 
 static DEFINE_SPINLOCK(nvme_bitmap_lock);
 
@@ -85,18 +82,18 @@ static bool global_readonly_flag = true;
 
 #define SLO_REQ_SIZE 4096
 
-DEFINE_PERCPU(struct mempool, request_mempool __attribute__ ((aligned (64))));
-DEFINE_PERCPU(struct mempool, ctx_mempool __attribute__ ((aligned (64))));
-DEFINE_PERCPU(struct mempool, nvme_swq_mempool __attribute__ ((aligned (64))));
-DEFINE_PERCPU(int, received_nvme_completions);
+RTE_DEFINE_PER_LCORE(struct mempool, request_mempool __attribute__ ((aligned (64))));
+RTE_DEFINE_PER_LCORE(struct mempool, ctx_mempool __attribute__ ((aligned (64))));
+RTE_DEFINE_PER_LCORE(struct mempool, nvme_swq_mempool __attribute__ ((aligned (64))));
+RTE_DEFINE_PER_LCORE(int, received_nvme_completions);
 
-DEFINE_PERCPU(struct nvme_tenant_mgmt, nvme_tenant_manager);
+RTE_DEFINE_PER_LCORE(struct nvme_tenant_mgmt, nvme_tenant_manager);
 
-DEFINE_PERCPU(unsigned long, last_sched_time);
-DEFINE_PERCPU(unsigned long, last_sched_time_be);
-DEFINE_PERCPU(unsigned long, local_extra_demand);
-DEFINE_PERCPU(unsigned long, local_leftover_tokens);
-DEFINE_PERCPU(int, roundrobin_start);
+RTE_DEFINE_PER_LCORE(unsigned long, last_sched_time);
+RTE_DEFINE_PER_LCORE(unsigned long, last_sched_time_be);
+RTE_DEFINE_PER_LCORE(unsigned long, local_extra_demand);
+RTE_DEFINE_PER_LCORE(unsigned long, local_leftover_tokens);
+RTE_DEFINE_PER_LCORE(int, roundrobin_start);
 
 static int nvme_compute_req_cost(int req_type, size_t req_len);
 
@@ -205,33 +202,41 @@ int init_nvme_request(void)
 		return 0;
 	}
 	
-	ret = mempool_create_datastore(m, NUM_NVME_REQUESTS, spdk_nvme_request_size(), 1, MEMPOOL_DEFAULT_CHUNKSIZE, "nvme_request");
+	ret = mempool_create_datastore(m, NUM_NVME_REQUESTS, spdk_nvme_request_size(), "nvme_request");
 	if (ret) {
 		return ret;
 	}
-	ret = mempool_pagemem_map_to_user(m);
+	
+	
+	//ret = mempool_pagemem_map_to_user(m);
+	
 	if (ret) {
-		mempool_pagemem_destroy(m);
+		//mempool_pagemem_destroy(m);
+		mempool_destroy_datastore(m);
+		return ret;
+	}
+	
+
+	ret = mempool_create_datastore(m2, NUM_NVME_REQUESTS, sizeof(struct nvme_ctx), "nvme_ctx");
+	if (ret) {
+		//mempool_pagemem_destroy(m);
 		return ret;
 	}
 
-	ret = mempool_create_datastore(m2, NUM_NVME_REQUESTS, sizeof(struct nvme_ctx), 1, MEMPOOL_DEFAULT_CHUNKSIZE, "nvme_ctx");
-	if (ret) {
-		mempool_pagemem_destroy(m);
-		return ret;
-	}
+	/*
 	ret = mempool_pagemem_map_to_user(m2);
 	if (ret) {
 		mempool_pagemem_destroy(m);
 		mempool_pagemem_destroy(m2);
 		return ret;
 	}
+	*/
 
 	// memory for software queues for nvme scheduling
 	ret = mempool_create_datastore(m3, (MEMPOOL_DEFAULT_CHUNKSIZE*MAX_NVME_FLOW_GROUPS)/MEMPOOL_DEFAULT_CHUNKSIZE * 2, 
-								   sizeof(struct nvme_sw_queue),1,MEMPOOL_DEFAULT_CHUNKSIZE,"nvme_swq");
+								   sizeof(struct nvme_sw_queue), "nvme_swq");
 	if (ret) {
-		mempool_pagemem_destroy(m);
+		//mempool_pagemem_destroy(m);
 		return ret;
 	}
 
@@ -248,9 +253,9 @@ int init_nvme_request(void)
  */
 void nvme_request_exit_cpu(void)
 {
-	mempool_pagemem_destroy(&request_datastore);
-	mempool_pagemem_destroy(&ctx_datastore);
-	mempool_pagemem_destroy(&nvme_swq_datastore);
+	//mempool_pagemem_destroy(&request_datastore);
+	//mempool_pagemem_destroy(&ctx_datastore);
+	//mempool_pagemem_destroy(&nvme_swq_datastore);
 }
 
 
@@ -321,6 +326,7 @@ int init_nvmedev(void)
 	g_nvme_dev = dev;
 
 	if (spdk_nvme_probe(NULL, probe_cb, attach_cb, NULL) != 0) {
+	//if (spdk_nvme_probe(NULL, probe_cb, attach_cb) != 0) {
 		log_info("spdk_nvme_probe() failed\n");
 		return 1;
 	}
@@ -549,7 +555,7 @@ int set_nvme_flow_group_id(long flow_group_id, long* fg_handle_to_set)
 		if (bitmap_test(nvme_fgs_bitmap, i)){
 			// if already registered this flow group, return its index
 			if (nvme_fgs[i].flow_group_id == flow_group_id &&
-				nvme_fgs[i].tid == percpu_get(cpu_nr)){
+				nvme_fgs[i].tid == RTE_PER_LCORE(cpu_nr)){
 				*fg_handle_to_set = i;
     			spin_unlock(&nvme_bitmap_lock);	
 				return 1;
@@ -826,7 +832,7 @@ long bsys_nvme_register_flow(long flow_group_id, unsigned long cookie,
 	nvme_fg->IOPS_SLO = IOPS_SLO;
 	nvme_fg->rw_ratio_SLO = rw_ratio_SLO;
 	nvme_fg->scaled_IOPS_limit = scaled_IOPS(IOPS_SLO, rw_ratio_SLO);
-	nvme_fg->tid = percpu_get(cpu_nr);
+	nvme_fg->tid = RTE_PER_LCORE(cpu_nr);
 
 	if (already_registered_flow == 1 
 		&& nvme_fg->scaled_IOPS_limit != scaled_IOPS(IOPS_SLO, rw_ratio_SLO)){
@@ -875,12 +881,12 @@ long bsys_nvme_register_flow(long flow_group_id, unsigned long cookie,
 		
 		if (latency_us_SLO == 0){
 			log_info("Register tenant %ld (port id: %ld). Managed by thread %ld. Best-effort tenant. \n", 
-					 fg_handle, flow_group_id, percpu_get(cpu_nr));
+					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr));
 
 		}
 		else{
 			log_info("Register tenant %ld (port id: %ld). Managed by thread %ld. IOPS_SLO: %lu, r/w %d, scaled_IOPS: %lu tokens/s, latency SLO: %lu us. \n", 
-					 fg_handle, flow_group_id, percpu_get(cpu_nr),  IOPS_SLO, rw_ratio_SLO, nvme_fg->scaled_IOPS_limit, latency_us_SLO);
+					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr),  IOPS_SLO, rw_ratio_SLO, nvme_fg->scaled_IOPS_limit, latency_us_SLO);
 		}
 	}
 	nvme_fg->conn_ref_count++;
@@ -955,7 +961,8 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 		return -RET_NOMEM;
 	}
 	ctx->cookie = cookie;
-
+	
+	/*
 	paddr = (void *) vm_lookup_phys(vaddr, PGSIZE_2MB);
 	if (unlikely(!paddr)) {
 		log_info("bsys_nvme_write: no paddr for requested vaddr!");
@@ -963,10 +970,12 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 	}
  
 	paddr = (void *) ((uintptr_t) paddr + PGOFF_2MB(vaddr));
-	
+	*/
+	paddr = vaddr;	
+
 	if (nvme_sched_flag){
 		// Store all info in ctx before add to software queue
-		ctx->tid = percpu_get(cpu_nr);
+		ctx->tid = RTE_PER_LCORE(cpu_nr);
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_WRITE;
 		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_WRITE, lba_count * global_ns_sector_size);
@@ -1000,6 +1009,7 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	struct spdk_nvme_ns *ns;
 	struct nvme_ctx *ctx;
 	void* paddr;
+	unsigned int ns_sector_size;
 	int ret;
 	
 	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
@@ -1011,18 +1021,21 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	}
 	ctx->cookie = cookie;
 	
+	/*
 	paddr = (void *) vm_lookup_phys(vaddr, PGSIZE_2MB);
 	if (unlikely(!paddr)) {
 		log_info("bsys_nvme_read: no paddr for requested vaddr!");
 		return -RET_FAULT;
 	}
 	paddr = (void *) ((uintptr_t) paddr + PGOFF_2MB(vaddr));
-
+	*/
+	paddr = vaddr;
+		
 	ctx->user_buf.buf = vaddr;
 	
 	if (nvme_sched_flag) {
 		// Store all info in ctx before add to software queue
-		ctx->tid = percpu_get(cpu_nr);
+		ctx->tid = RTE_PER_LCORE(cpu_nr);
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_READ;
 		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_READ, lba_count * global_ns_sector_size);
@@ -1054,7 +1067,7 @@ static void sgl_reset_cb(void *cb_arg, uint32_t sgl_offset)
 {
 	struct nvme_ctx *ctx = (struct nvme_ctx *)cb_arg;
 
-	ctx->user_buf.sgl_buf.current_sgl = sgl_offset / SGL_PAGE_SIZE;
+	ctx->user_buf.sgl_buf.current_sgl = sgl_offset;
 }
 
 static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
@@ -1062,25 +1075,27 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 	void *paddr;
 	void __user *__restrict temp;
 	struct nvme_ctx *ctx = (struct nvme_ctx *)cb_arg;
-	
+
 	if (ctx->user_buf.sgl_buf.current_sgl == ctx->user_buf.sgl_buf.num_sgls) {
 		*address = 0;
 		*length = 0;
-		log_info("Warning: nvme req size mismatch\n");
+		log_info("Warning: nvme req size mismatch\n"); 
 		assert(0);
 	}
 	else {
 		temp = ctx->user_buf.sgl_buf.sgl[ctx->user_buf.sgl_buf.current_sgl++];
+		/*
 		paddr = (void *) vm_lookup_phys(temp, PGSIZE_2MB);
 		if (unlikely(!paddr)) {
-			log_info("no paddr for requested buf!\n");
+			log_info("bsys_nvme_read: no paddr for requested buf!");
 			return -RET_FAULT;
 		}
+		*/
 		//virt to phys
-		*address = (uint64_t) ((uintptr_t) paddr + PGOFF_2MB(temp));
-		//phys to hw
-		*address = nvme_vtophys((void *)*address);
-		*length = PGSIZE_4KB;
+		//*address = (uint64_t) ((uintptr_t) paddr + PGOFF_2MB(temp));
+		//*address = nvme_vtophys((void *)*address);
+		*address = nvme_vtophys((void *)temp);
+		*length = 4096; //PGSIZE_4KB
 	}
 	return 0;
 }
@@ -1138,7 +1153,7 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 	struct spdk_nvme_ns *ns;
 	struct nvme_ctx *ctx;
 	int ret;
-
+	
 	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
 	
 	ctx = alloc_local_nvme_ctx();
@@ -1152,7 +1167,7 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 	
 	if (nvme_sched_flag) {
 		// Store all info in ctx before add to software queue
-		ctx->tid = percpu_get(cpu_nr);
+		ctx->tid = RTE_PER_LCORE(cpu_nr);
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_READ;
 		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_READ, lba_count * global_ns_sector_size);
@@ -1223,18 +1238,18 @@ static void issue_nvme_req(struct nvme_ctx* ctx)
 
 	if (ctx->cmd == NVME_CMD_READ) {
 		// if PRP:
-		//ret = spdk_nvme_ns_cmd_read(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_read_cb, ctx, 0);
+		ret = spdk_nvme_ns_cmd_read(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_read_cb, ctx, 0);
 		// for SGL:
-		ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
-									 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
+		//ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
+		//							 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		
 	}
 	else if (ctx->cmd == NVME_CMD_WRITE) {
 		// if PRP:
-		//ret = spdk_nvme_ns_cmd_write(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_write_cb, ctx, 0);
+		ret = spdk_nvme_ns_cmd_write(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_write_cb, ctx, 0);
 		// for SGL:
-		ret = spdk_nvme_ns_cmd_writev(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
-									  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
+		//ret = spdk_nvme_ns_cmd_writev(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
+		//							  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		
 	}
 	else {
@@ -1458,7 +1473,7 @@ static inline void nvme_sched_subround2(void)
 static void update_scheduled_bitvector(void){
 	
 	int i;
-	scheduled_bit_vector[percpu_get(cpu_nr)]++;
+	scheduled_bit_vector[RTE_PER_LCORE(cpu_nr)]++;
 
 	for (i = 0; i < cpus_active; i++){
 		if (scheduled_bit_vector[i] == 0)

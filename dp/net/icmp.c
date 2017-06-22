@@ -58,6 +58,10 @@
  * See RFC 792 for more details.
  */
 
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_mbuf.h>
+
 #include <ix/stddef.h>
 #include <ix/errno.h>
 #include <ix/log.h>
@@ -72,12 +76,13 @@
 
 #include "net.h"
 
-static int icmp_reflect(struct eth_fg *cur_fg, struct mbuf *pkt, struct icmp_hdr *hdr, int len)
+static int icmp_reflect(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct icmp_hdr *hdr, int len)
 {
 	struct eth_hdr *ethhdr = mbuf_mtod(pkt, struct eth_hdr *);
 	struct ip_hdr *iphdr = mbuf_nextd(ethhdr, struct ip_hdr *);
 	int ret;
 
+	
 	ethhdr->dhost = ethhdr->shost;
 	ethhdr->shost = CFG.mac;
 
@@ -89,12 +94,14 @@ static int icmp_reflect(struct eth_fg *cur_fg, struct mbuf *pkt, struct icmp_hdr
 	hdr->chksum = chksum_internet((void *) hdr, len);
 
 	pkt->ol_flags = 0;
+	pkt->pkt_len = rte_pktmbuf_pkt_len(pkt);
+	pkt->data_len = rte_pktmbuf_pkt_len(pkt);
 
+	ret = rte_eth_tx_burst(0, 0, &pkt, 1);
 
-	ret = eth_send_one(percpu_get(eth_txqs)[cur_fg->dev_idx], pkt, pkt->len);
-
-	if (unlikely(ret)) {
-		mbuf_free(pkt);
+	if (unlikely(ret < 1)) {
+		printf("Warning: could not send ICMP reply\n");
+		rte_pktmbuf_free(pkt);
 		return -EIO;
 	}
 
@@ -106,14 +113,14 @@ static int icmp_reflect(struct eth_fg *cur_fg, struct mbuf *pkt, struct icmp_hdr
  * @pkt: the packet
  * @hdr: the ICMP header
  */
-void icmp_input(struct eth_fg *cur_fg, struct mbuf *pkt, struct icmp_hdr *hdr, int len)
+void icmp_input(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct icmp_hdr *hdr, int len)
 {
 	if (len < ICMP_MINLEN)
 		goto out;
 	if (chksum_internet((void *) hdr, len))
 		goto out;
 
-	log_debug("icmp: got request type %d, code %d\n",
+	log_info("icmp: got request type %d, code %d\n",
 		  hdr->type, hdr->code);
 
 	switch (hdr->type) {
@@ -142,13 +149,13 @@ void icmp_input(struct eth_fg *cur_fg, struct mbuf *pkt, struct icmp_hdr *hdr, i
 	return;
 
 out:
-	mbuf_free(pkt);
+	rte_pktmbuf_free(pkt);
 }
 
 int icmp_echo(struct eth_fg *cur_fg, struct ip_addr *dest, uint16_t id, uint16_t seq, uint64_t timestamp)
 {
 	int ret;
-	struct mbuf *pkt;
+	struct rte_mbuf *pkt;
 	struct eth_hdr *ethhdr;
 	struct ip_hdr *iphdr;
 	struct icmp_pkt *icmppkt;
@@ -156,7 +163,7 @@ int icmp_echo(struct eth_fg *cur_fg, struct ip_addr *dest, uint16_t id, uint16_t
 	uint16_t len;
 
 	pkt = mbuf_alloc_local();
-	if (unlikely(!pkt))
+	if (unlikely(!(pkt)))
 		return -ENOMEM;
 
 	ethhdr = mbuf_mtod(pkt, struct eth_hdr *);

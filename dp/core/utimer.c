@@ -29,6 +29,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <rte_per_lcore.h>
 #include <ix/syscall.h>
 #include <ix/timer.h>
 
@@ -44,7 +45,7 @@ struct utimer_list {
 	struct utimer arr[UTIMER_COUNT];
 };
 
-DEFINE_PERCPU(struct utimer_list, utimers);
+RTE_DEFINE_PER_LCORE(struct utimer_list, utimers);
 
 void generic_handler(struct timer *t, struct eth_fg *unused)
 {

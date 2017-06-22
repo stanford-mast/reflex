@@ -95,6 +95,8 @@
  *
  */
 
+#include <rte_per_lcore.h>
+
 #include <ix/kstats.h>
 
 #include "lwip/opt.h"
@@ -137,7 +139,7 @@ struct LWIP_Context {
 
 
 
-DEFINE_PERCPU(struct tcp_pcb *, tcp_input_pcb);
+RTE_DEFINE_PER_LCORE(struct tcp_pcb *, tcp_input_pcb);
 
 /* Forward declarations. */
 static err_t tcp_process(struct LWIP_Context *,struct tcp_pcb *pcb,ipX_addr_t *cur_src_addr,ipX_addr_t *cur_dest_addr);
@@ -279,9 +281,10 @@ tcp_input(struct eth_fg *cur_fg, struct pbuf *p, ipX_addr_t *cur_src_addr, ipX_a
 
   pcb = tcp_input_find_list(&lwip_context,&cur_fg->active_tbl[idx].pcbs,cur_src_addr,cur_dest_addr);
   if (pcb) {
-	  mem_prefetch(&pcb->tmr);
-	  mem_prefetch(&pcb->rttest);
-	  if (pcb->unacked) mem_prefetch(pcb->unacked);
+	  // TODO: Shouldn't need to prefetch
+	  //mem_prefetch(&pcb->tmr);
+	  //mem_prefetch(&pcb->rttest);
+	  //if (pcb->unacked) mem_prefetch(pcb->unacked);
 	  KSTATS_VECTOR(tcp_input_fast_path);
 	  goto done_tcp_input;
   }
@@ -854,7 +857,7 @@ tcp_process(struct LWIP_Context * lwip_ctxt, struct tcp_pcb *pcb,ipX_addr_t *cur
         LWIP_ASSERT("pcb->accept != NULL", pcb->accept != NULL);
 #endif
         /* Call the accept function. */
-        TCP_EVENT_ACCEPT(pcb, ERR_OK, err);
+		TCP_EVENT_ACCEPT(pcb, ERR_OK, err);
         if (err != ERR_OK) {
           /* If the accept function returns with an error, we abort
            * the connection. */

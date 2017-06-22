@@ -24,6 +24,8 @@
 #ifndef __LWIP_MEMP_H__
 #define __LWIP_MEMP_H__
 
+#include <rte_per_lcore.h>
+
 #include <ix/types.h>
 #include <ix/cpu.h>
 #include <ix/mempool.h>
@@ -42,11 +44,11 @@ extern const u16_t memp_sizes[MEMP_MAX];
 int  memp_init(void);
 int  memp_init_cpu(void);
 
-DECLARE_PERCPU(struct mempool, pbuf_mempool);
-DECLARE_PERCPU(struct mempool, pbuf_with_payload_mempool);
-DECLARE_PERCPU(struct mempool, tcp_pcb_mempool);
-DECLARE_PERCPU(struct mempool, tcp_pcb_listen_mempool);
-DECLARE_PERCPU(struct mempool, tcp_seg_mempool);
+RTE_DECLARE_PER_LCORE(struct mempool, pbuf_mempool);
+RTE_DECLARE_PER_LCORE(struct mempool, pbuf_with_payload_mempool);
+RTE_DECLARE_PER_LCORE(struct mempool, tcp_pcb_mempool);
+RTE_DECLARE_PER_LCORE(struct mempool, tcp_pcb_listen_mempool);
+RTE_DECLARE_PER_LCORE(struct mempool, tcp_seg_mempool);
 
 static inline void *memp_malloc(memp_t type)
 {

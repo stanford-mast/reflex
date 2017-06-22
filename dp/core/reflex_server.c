@@ -60,7 +60,7 @@
 
 #include <ixev.h>
 #include <ixev_timer.h>
-#include <mempool.h>
+#include <ix/mempool.h>
 #include <ix/list.h>
 
 #include "reflex.h" 
@@ -430,16 +430,16 @@ static void receive_req(struct pp_conn *conn)
 		switch (header->opcode) {
 		case CMD_SET:
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_WR, &nvme_written_cb);
-			//ixev_nvme_write(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
-			ixev_nvme_writev(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
-					header->lba, header->lba_count, (unsigned long)&req->ctx);
+			ixev_nvme_write(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
+			//ixev_nvme_writev(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
+			//		header->lba, header->lba_count, (unsigned long)&req->ctx);
 			conn->nvme_pending++;	
 			break;
 		case CMD_GET:
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_RD, &nvme_response_cb);
-			//ixev_nvme_read(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
-			ixev_nvme_readv(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
-					header->lba, header->lba_count, (unsigned long)&req->ctx);
+			ixev_nvme_read(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
+			//ixev_nvme_readv(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
+			//		header->lba, header->lba_count, (unsigned long)&req->ctx);
 			conn->nvme_pending++;	
 			break;
 		default:
@@ -558,30 +558,43 @@ static struct ixev_conn_ops pp_conn_ops = {
 	.release	= &pp_release,
 };
 
-static void *pp_main(void *arg)
+
+
+static pthread_mutex_t launch_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t launch_cond = PTHREAD_COND_INITIALIZER;
+
+struct launch_req {
+	struct launch_req *next;
+};
+
+static struct launch_req *launch_reqs;
+
+void *pp_main(void *arg)
 {
 	int ret;
 	conn_opened = 0;
-	
+	printf("pp_main on cpu %d, thread self is %x\n", percpu_get(cpu_nr),pthread_self());
+	struct launch_req *req;
+
 	ret = ixev_init_thread();
 	if (ret) {
 		fprintf(stderr, "unable to init IXEV\n");
 		return NULL;
 	};
 
-	ret = mempool_create(&nvme_req_pool, &nvme_req_datastore);
+	ret = mempool_create(&nvme_req_pool, &nvme_req_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret) {
 		fprintf(stderr, "unable to create mempool\n");
 		return NULL;
 	}
 
-	ret = mempool_create(&nvme_req_buf_pool, &nvme_req_buf_datastore);
+	ret = mempool_create(&nvme_req_buf_pool, &nvme_req_buf_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret) {
 		fprintf(stderr, "unable to create mempool\n");
 		return NULL;
 	}
 
-	ret = mempool_create(&pp_conn_pool, &pp_conn_datastore);
+	ret = mempool_create(&pp_conn_pool, &pp_conn_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret) {
 		fprintf(stderr, "unable to create mempool\n");
 		return NULL;
@@ -595,33 +608,31 @@ static void *pp_main(void *arg)
 	return NULL;
 }
 
-int main(int argc, char *argv[])
+int reflex_server_main(int argc, char *argv[])
 {
 	int i, nr_cpu;
 	pthread_t tid;
 	int ret;
 	unsigned int pp_conn_pool_entries;
 
-	nr_cpu = sys_nrcpus();
+	nr_cpu = cpus_active; // sys_nrcpus();
 	if (nr_cpu < 1) {
 		fprintf(stderr, "got invalid cpu count %d\n", nr_cpu);
 		exit(-1);
 	}
 
-	nr_cpu--; /* don't count the main thread */
+//	nr_cpu--; /* don't count the main thread */
 		
 	ret = mempool_create_datastore(&nvme_req_datastore, 
 				       outstanding_reqs,
-				       sizeof(struct nvme_req), false, 
-				       MEMPOOL_DEFAULT_CHUNKSIZE, "nvme_req");
+				       sizeof(struct nvme_req), "nvme_req_datastore");
 	if (ret) {
 		fprintf(stderr, "unable to create datastore\n");
 		return ret;
 	}
 	ret = mempool_create_datastore(&nvme_req_buf_datastore, 
 				       outstanding_reqs,
-				       4096, false, 
-				       MEMPOOL_DEFAULT_CHUNKSIZE, "nvme_req");
+				       4096, "nvme_req_buf_datastore");
 	if (ret) {
 		fprintf(stderr, "unable to create datastore\n");
 		return ret;
@@ -634,12 +645,12 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "failed to initialize ixev nvme\n");
 		return ret;
 	}
-	ret = mempool_create_datastore(&pp_conn_datastore, pp_conn_pool_entries, sizeof(struct pp_conn), 0, MEMPOOL_DEFAULT_CHUNKSIZE, "pp_conn");
+	ret = mempool_create_datastore(&pp_conn_datastore, pp_conn_pool_entries, sizeof(struct pp_conn), "pp_conn");
 	if (ret) {
 		fprintf(stderr, "unable to create mempool\n");
 		return ret;
 	}
-     	
+     /*	
 	sys_spawnmode(true);
 	for (i = 0; i < nr_cpu; i++) {
 		if (pthread_create(&tid, NULL, pp_main, NULL)) {
@@ -648,6 +659,21 @@ int main(int argc, char *argv[])
 		}
 	}
 	printf("Started ReFlex server with %i threads..\n", nr_cpu + 1);
+	*/
+
+
+	for (i = 1; i < nr_cpu; i++) {
+		//ret = pthread_create(&tid, NULL, start_cpu, (void *)(unsigned long) i);
+		log_info("rte_eal_remote_launch...pp_main\n");
+		ret = rte_eal_remote_launch(pp_main, (void *)(unsigned long) i, i);		
+
+		if (ret) {
+			log_err("init: unable to start app\n");
+			return -EAGAIN;
+		}
+	}
+
+	printf("Started ReFlex server...\n");
 	pp_main(NULL);
 	return 0;
 }

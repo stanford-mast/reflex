@@ -39,6 +39,7 @@
 #include <ix/types.h>
 #include <assert.h>
 #include <ix/log.h>
+#include <ix/cpu.h>
 
 #define SPINLOCK_INITIALIZER_RECURSIVE {.locked = 0}
 #define DEFINE_SPINLOCK_RECURSIVE(name) \

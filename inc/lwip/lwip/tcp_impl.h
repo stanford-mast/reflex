@@ -347,7 +347,7 @@ struct tcp_seg {
 #endif /* LWIP_WND_SCALE */
 
 /* Global variables: */
-DECLARE_PERCPU(struct tcp_pcb *, tcp_input_pcb);
+RTE_DECLARE_PER_LCORE(struct tcp_pcb *, tcp_input_pcb);
 
 /* The TCP PCB lists. */
 
@@ -376,7 +376,7 @@ struct tcp_global_percpu_lists {
 	int nothing;
 };
 
-DECLARE_PERCPU(struct tcp_global_percpu_lists,tcp_cpu_lists);
+RTE_DECLARE_PER_LCORE(struct tcp_global_percpu_lists,tcp_cpu_lists);
 
 static inline int tcp_to_idx(ipX_addr_t *local_ip, ipX_addr_t *remote_ip, uint16_t local_port, uint16_t remote_port)
 {

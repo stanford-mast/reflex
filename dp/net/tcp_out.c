@@ -992,14 +992,14 @@ tcp_send_empty_ack(struct eth_fg *cur_fg,struct tcp_pcb *pcb)
 err_t
 tcp_output(struct eth_fg *cur_fg,struct tcp_pcb *pcb)
 {
-
   struct tcp_seg *seg, *useg;
   u32_t wnd, snd_nxt;
 #if TCP_CWND_DEBUG
   s16_t i = 0;
 #endif /* TCP_CWND_DEBUG */
 
-  mem_prefetch(&pcb->rttest);
+  // TODO: Shouldn't need to prefetch
+  //mem_prefetch(&pcb->rttest);
 
   MEMPOOL_SANITY_ACCESS(pcb);
 

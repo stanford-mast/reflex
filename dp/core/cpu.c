@@ -58,6 +58,14 @@
 
 #define _GNU_SOURCE
 
+#include <sys/socket.h>
+#include <rte_config.h>
+#include <rte_memzone.h>
+#include <rte_malloc.h>
+#include <rte_lcore.h>
+#include <rte_per_lcore.h>
+#include <rte_malloc.h>
+
 #include <unistd.h>
 #include <sched.h>
 #include <sys/syscall.h>
@@ -65,22 +73,22 @@
 #include <ix/stddef.h>
 #include <ix/errno.h>
 #include <ix/log.h>
+
+#include <ix/lock.h>
 #include <ix/cpu.h>
-#include <ix/mem.h>
 
 int cpu_count;
 int cpus_active;
 
-DEFINE_PERCPU(unsigned int, cpu_numa_node);
-DEFINE_PERCPU(unsigned int, cpu_id);
-DEFINE_PERCPU(unsigned int, cpu_nr);
+RTE_DEFINE_PER_LCORE(unsigned int, cpu_numa_node);
+RTE_DEFINE_PER_LCORE(unsigned int, cpu_id);
+RTE_DEFINE_PER_LCORE(unsigned int, cpu_nr);
 
 void *percpu_offsets[NCPU];
 
 extern const char __percpu_start[];
 extern const char __percpu_end[];
 
-extern int dune_enter_ex(void *percpu);
 #define PERCPU_DUNE_LEN	512
 
 struct cpu_runner {
@@ -94,7 +102,10 @@ struct cpu_runlist {
 	struct cpu_runner *next_runner;
 } __aligned(CACHE_LINE_SIZE);
 
-static DEFINE_PERCPU(struct cpu_runlist, runlist);
+static RTE_DEFINE_PER_LCORE(struct cpu_runlist, runlist);
+
+#define MAX_LCORES 128
+static void *global_runlists[MAX_LCORES];
 
 /**
  * cpu_run_on_one - calls a function on the specified CPU
@@ -120,7 +131,7 @@ int cpu_run_on_one(cpu_func_t func, void *data, unsigned int cpu)
 	runner->data = data;
 	runner->next = NULL;
 
-	rlist = &percpu_get_remote(runlist, cpu);
+	rlist = global_runlists[cpu];
 
 	spin_lock(&rlist->lock);
 	runner->next = rlist->next_runner;
@@ -151,26 +162,6 @@ void cpu_do_bookkeeping(void)
 			free(last);
 		} while (runner);
 	}
-}
-
-static void *cpu_init_percpu(unsigned int cpu, unsigned int numa_node)
-{
-	size_t len = __percpu_end - __percpu_start;
-	char *addr, *addr_percpu;
-
-	addr = mem_alloc_pages_onnode(div_up(len + PERCPU_DUNE_LEN, PGSIZE_2MB),
-				      PGSIZE_2MB, numa_node, MPOL_BIND);
-	if (!addr)
-		return NULL;
-
-	addr_percpu = addr + PERCPU_DUNE_LEN;
-
-	memset(addr_percpu, 0, len);
-
-	*((char **) addr) = addr_percpu;
-	percpu_offsets[cpu] = addr_percpu;
-
-	return addr;
 }
 
 
@@ -209,19 +200,16 @@ int cpu_init_one(unsigned int cpu)
 		log_err("cpu: couldn't migrate to the correct core\n");
 		return -EINVAL;
 	}
-
+/*
 	pcpu = cpu_init_percpu(cpu, numa_node);
+
 	if (!pcpu)
 		return -ENOMEM;
+*/
 
-	ret = dune_enter_ex(pcpu);
-	if (ret) {
-		log_err("cpu: failed to initialize Dune\n");
-		return ret;
-	}
+	RTE_PER_LCORE(cpu_id) = cpu;
 
-	percpu_get(cpu_id) = cpu;
-	percpu_get(cpu_numa_node) = numa_node;
+	RTE_PER_LCORE(cpu_numa_node) = numa_node;
 	log_is_early_boot = false;
 
 	log_info("cpu: started core %d, numa node %d\n", cpu, numa_node);

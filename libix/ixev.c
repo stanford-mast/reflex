@@ -57,7 +57,7 @@
  */
 
 #include <ix/stddef.h>
-#include <mempool.h>
+#include <ix/mempool.h>
 #include <stdio.h>
 #include <errno.h>
 
@@ -276,7 +276,7 @@ static void ixev_nvme_opened(hqu_t handle, unsigned long ns_size, unsigned long 
 		return;
 	}
 
-	//printf("ixev: opened nvme handle %lu\n", handle);
+	printf("ixev: opened nvme handle %lu\n", handle);
 
 	ixev_nvme_global_ops.opened(handle, ns_size, ns_sector_size );
 }
@@ -584,7 +584,6 @@ void ixev_nvme_open(long dev_id, long ns_id)
 		printf("ixev: ran out of command space 1\n");
 		exit(-1);
 	}
-	//printf("opening ns %lx\n", ns_id);
 	ksys_nvme_open(__bsys_arr_next(karr), dev_id, ns_id);
 
 }
@@ -877,7 +876,6 @@ void ixev_wait(void)
 	 * FIXME: don't use the low-level library,
 	 * just make system calls directly.
 	 */
-
 	ix_poll();
 	ixev_generation++;
 
@@ -888,7 +886,6 @@ void ixev_wait(void)
 
 	//printf("now handle events\n");
 	ix_handle_events();
-	//printf("handled\n");
 }
 
 
@@ -931,14 +928,13 @@ int ixev_init_thread(void)
 {
 	int ret;
 
-	ret = mempool_create(&ixev_buf_pool, &ixev_buf_datastore);
+	ret = mempool_create(&ixev_buf_pool, &ixev_buf_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret)
 		return ret;
 
 	ret = ix_init(&ixev_ops, CMD_BATCH_SIZE*2);
 	if (ret) {
 		printf("error: ix_init failed in ixev_init_thread\n");
-		mempool_destroy(&ixev_buf_pool);
 		return ret;
 	}
 
@@ -958,7 +954,7 @@ int ixev_init(struct ixev_conn_ops *ops)
 	/* FIXME: check if running inside IX */
 	int ret;
 
-	ret = mempool_create_datastore(&ixev_buf_datastore, 131072, sizeof(struct ixev_buf), 0, MEMPOOL_DEFAULT_CHUNKSIZE, "ixev_buf");
+	ret = mempool_create_datastore(&ixev_buf_datastore, 131072, sizeof(struct ixev_buf), "ixev_buf");
 	if (ret)
 		return ret;
 
@@ -980,7 +976,7 @@ int ixev_init_nvme(struct ixev_nvme_ops *ops)
 	/* FIXME: check if running inside IX */
 	int ret;
 
-	ret = mempool_create_datastore(&ixev_buf_datastore, 131072, sizeof(struct ixev_buf), 0, MEMPOOL_DEFAULT_CHUNKSIZE, "ixev_buf");
+	ret = mempool_create_datastore(&ixev_buf_datastore, 131072, sizeof(struct ixev_buf), "ixev_buf");
 	if (ret)
 		return ret;
 
@@ -1002,7 +998,7 @@ int ixev_init_conn_nvme(struct ixev_conn_ops *conn_ops, struct ixev_nvme_ops *nv
 	/* FIXME: check if running inside IX */
 	int ret;
 
-	ret = mempool_create_datastore(&ixev_buf_datastore, 131072, sizeof(struct ixev_buf), 0, MEMPOOL_DEFAULT_CHUNKSIZE, "ixev_buf");
+	ret = mempool_create_datastore(&ixev_buf_datastore, 131072, sizeof(struct ixev_buf), "ixev_buf");
 	if (ret)
 		return ret;
 

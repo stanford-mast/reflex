@@ -58,7 +58,7 @@
 
 #pragma once
 
-#include "syscall.h"
+#include "libix_syscall.h"
 
 struct ix_ops {
 	void (*udp_recv)(void *addr, size_t len, struct ip_tuple *id);

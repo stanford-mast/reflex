@@ -94,6 +94,7 @@
  *
  */
 
+#include <rte_per_lcore.h>
 #include "lwip/opt.h"
 
 #if LWIP_TCP /* don't build if not configured for use in lwipopts.h */
@@ -172,7 +173,7 @@ static u16_t tcp_new_port(void);
 
 /* The TCP PCB lists. */
 
-DEFINE_PERCPU(struct tcp_global_percpu_lists,tcp_cpu_lists);
+RTE_DEFINE_PER_LCORE(struct tcp_global_percpu_lists,tcp_cpu_lists);
 
 static void tcpip_tcp_timer(struct timer *t, struct eth_fg *cur_fg);
 

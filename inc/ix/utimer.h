@@ -31,11 +31,13 @@
 
 #pragma once
 
+
+#include <rte_per_lcore.h>
 #include <ix/stddef.h>
 
 struct utimer_list;
 
-DECLARE_PERCPU(struct utimer_list, utimers);
+RTE_DECLARE_PER_LCORE(struct utimer_list, utimers);
 
 int utimer_init(struct utimer_list *tl, void *udata);
 

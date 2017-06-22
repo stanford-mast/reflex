@@ -53,6 +53,8 @@
  */
 
 
+#include <sys/socket.h>
+#include <rte_per_lcore.h>
 
 #include <ix/mbuf.h>
 #include <ix/timer.h>
@@ -85,7 +87,7 @@ struct netif *ip_route(struct ip_addr *dest)
 	return &netif;
 }
 
-void tcp_input_tmp(struct eth_fg *cur_fg, struct mbuf *pkt, struct ip_hdr *iphdr, void *tcphdr)
+void tcp_input_tmp(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct ip_hdr *iphdr, void *tcphdr)
 {
 	struct pbuf *pbuf;
 
@@ -103,11 +105,11 @@ static struct mempool_datastore  pbuf_with_payload_ds;
 static struct mempool_datastore  tcp_pcb_ds;
 static struct mempool_datastore  tcp_seg_ds;
 
-DEFINE_PERCPU(struct mempool, pbuf_mempool __attribute__ ((aligned (64))));
-DEFINE_PERCPU(struct mempool, pbuf_with_payload_mempool __attribute__ ((aligned (64))));
-DEFINE_PERCPU(struct mempool, tcp_pcb_mempool __attribute__ ((aligned (64))));
-DEFINE_PERCPU(struct mempool, tcp_pcb_listen_mempool __attribute__ ((aligned (64))));
-DEFINE_PERCPU(struct mempool, tcp_seg_mempool __attribute__ ((aligned (64))));
+RTE_DEFINE_PER_LCORE(struct mempool, pbuf_mempool __attribute__ ((aligned (64))));
+RTE_DEFINE_PER_LCORE(struct mempool, pbuf_with_payload_mempool __attribute__ ((aligned (64))));
+RTE_DEFINE_PER_LCORE(struct mempool, tcp_pcb_mempool __attribute__ ((aligned (64))));
+RTE_DEFINE_PER_LCORE(struct mempool, tcp_pcb_listen_mempool __attribute__ ((aligned (64))));
+RTE_DEFINE_PER_LCORE(struct mempool, tcp_seg_mempool __attribute__ ((aligned (64))));
 
 #define MEMP_SIZE (256*1024)
 #define PBUF_CAPACITY (768*1024)
@@ -116,7 +118,7 @@ DEFINE_PERCPU(struct mempool, tcp_seg_mempool __attribute__ ((aligned (64))));
 
 static int init_mempool(struct mempool_datastore *m, int nr_elems, size_t elem_len, const char *prettyname)
 {
-	return mempool_create_datastore(m, nr_elems, elem_len, 0, MEMPOOL_DEFAULT_CHUNKSIZE,prettyname);
+	return mempool_create_datastore(m, nr_elems, elem_len, prettyname);
 }
 
 int memp_init(void)

@@ -58,6 +58,8 @@
 
 #pragma once
 
+#include <rte_per_lcore.h>
+
 #include <ix/stddef.h>
 #include <ix/list.h>
 #include <ix/lock.h>
@@ -134,6 +136,7 @@ extern void eth_fg_unregister_listener(struct eth_fg_listener *l);
 
 //DECLARE_PERCPU(struct eth_fg *,the_cur_fg); // ugly - avoid using
 
+extern struct eth_fg *fgs[ETH_MAX_TOTAL_FG + NCPU];
 
 /**
  * eth_fg_set_current - sets the current flowgroup
@@ -144,7 +147,10 @@ extern void eth_fg_unregister_listener(struct eth_fg_listener *l);
  */
 static inline void eth_fg_set_current(struct eth_fg *fg)
 {
-	assert(fg->cur_cpu == percpu_get(cpu_id));
+	
+	//printf("fg->cur_cpu check if it's the same as percpu_get(cpu_id)\n");
+	fg = fgs[percpu_get(cpu_id)]; //FIXME: figure out flow group stuff
+	//assert(fg->cur_cpu == percpu_get(cpu_id));
 //	percpu_get(the_cur_fg) = fg;
 }
 
@@ -161,7 +167,6 @@ extern void eth_fg_assign_to_cpu(bitmap_ptr fg_bitmap, int cpu);
 
 extern int nr_flow_groups;
 
-extern struct eth_fg *fgs[ETH_MAX_TOTAL_FG + NCPU];
 
 static inline int outbound_fg_idx(void)
 {
@@ -211,7 +216,10 @@ static inline unsigned int __fg_next_active(unsigned int fgid)
 #define for_each_active_fg(fgid) \
 	for ((fgid) = -1; (fgid) = __fgid_next_active(fgid); (fgid) < nr_flow_groups)
 
-DECLARE_PERCPU(unsigned int, cpu_numa_node);
+
+struct queue;
+
+RTE_DECLARE_PER_LCORE(struct queue, remote_mbuf_queue);
 
 struct mbuf;
 
