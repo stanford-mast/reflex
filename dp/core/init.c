@@ -203,7 +203,7 @@ static int init_ethdev(void)
 	dev_conf = &default_eth_conf;
 
 	uint8_t nb_ports;
-	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; //4096
+	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; //1024
 	uint16_t nb_rx_desc = ETH_DEV_RX_QUEUE_SZ; //512
 	struct rte_eth_dev_info dev_info;
 	struct rte_eth_txconf* txconf; 

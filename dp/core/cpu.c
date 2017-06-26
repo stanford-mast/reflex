@@ -105,7 +105,7 @@ struct cpu_runlist {
 static RTE_DEFINE_PER_LCORE(struct cpu_runlist, runlist);
 
 #define MAX_LCORES 128
-static void *global_runlists[MAX_LCORES];
+static struct cpu_runlist global_runlists[MAX_LCORES];
 
 /**
  * cpu_run_on_one - calls a function on the specified CPU
@@ -131,7 +131,7 @@ int cpu_run_on_one(cpu_func_t func, void *data, unsigned int cpu)
 	runner->data = data;
 	runner->next = NULL;
 
-	rlist = global_runlists[cpu];
+	rlist = &global_runlists[cpu];
 
 	spin_lock(&rlist->lock);
 	runner->next = rlist->next_runner;
