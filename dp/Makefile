@@ -72,7 +72,7 @@ ifneq ($(MAKECMDGOALS),clean)
 endif
 
 DPDK_LIBS=
-DPDK_LIBS+=-Wl,-whole-archive $(DPDK)/build/lib/librte_pmd_ixgbe.a -Wl,-no-whole-archive
+DPDK_LIBS+=-Wl,-whole-archive $(DPDK)/build/lib/librte_pmd_ixgbe.a $(DPDK)/build/lib/librte_pmd_ena.a  -Wl,-no-whole-archive
 DPDK_LIBS+=$(DPDK)/build/lib/libethdev.a
 DPDK_LIBS+=$(DPDK)/build/lib/librte_mbuf.a
 DPDK_LIBS+=$(DPDK)/build/lib/librte_eal.a
