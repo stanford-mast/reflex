@@ -11,7 +11,7 @@ In the userspace implementation (available in the [userspace](https://github.com
 
 ## Requirements for userspace version of ReFlex
 
-ReFlex requires a NVMe Flash device and a [network interface card supported by Intel DPDK](http://dpdk.org/doc/nics). We have tested ReFlex with the Intel 82599 10GbE NIC. We have tested ReFlex with the following NVMe SSDs: Samsung PM1725 and Intel P3600. 
+ReFlex requires a NVMe Flash device and a [network interface card supported by Intel DPDK](http://dpdk.org/doc/nics). We have tested ReFlex with the Intel 82599 10GbE NIC and the following NVMe SSDs: Samsung PM1725 and Intel P3600. We have also tested ReFlex on Amazon Web Services EC2 instances i3.4xlarge (see end of setup instructions below for AWS EC2 instance setup).
 
 ReFlex has been successfully tested on Ubuntu 16.04 LTS with kernel 4.4.0.
 
@@ -87,6 +87,16 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
    You may use any I/O load generation tool (e.g. [fio](https://github.com/axboe/fio)) for preconditioning and request calibration tests. Note that if you use a Linux-based tool, you will need to reload the nvme kernel module for these tests (remember to unload it before running the ReFlex server). 
   
    For your convenience, we provide an open-loop, local Flash load generator based on the SPDK perf example application [here](https://github.com/anakli/spdk_perf). We modified the SPDK perf example application to report read and write percentile latencies. We also made the load generator open-loop, so you can sweep throughput by specifying a target IOPS instead of queue depth. See setup instructions for ReFlex users in the repository's [README](https://github.com/anakli/spdk_perf/blob/master/README.md). 
+
+### Instructions for setting up an AWS EC2 instance to run ReFlex
+
+To run ReFlex on Amazon Web Servies EC2, you will need an instance type that supports [Enhanced Networking](http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/enhanced-networking.html#enabling_enhanced_networking) (this means the instance has a DPDK-supported Enhanced Networking Adapter). The instance also needs to have NVMe Flash. Use an i3.4xlarge or larger instance with Ubuntu 16.04 Linux. Using a dedicated instance is strongly recommended for performance measurements.
+
+You will need to setup a [Virtual Private Cloud (VPC)](http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-vpc.html) for your instance(s) so that you can add Ethernet interfaces on the instance(s) running ReFlex. When you are ready to launch your ReFlex instance, in the "configure instance details" step, you need to add an extra network interface. This is required because you need to bind one interface to the userspace igb_uio driver for ReFlex/DPDK and you need one interface bound to the kernel NIC driver to SSH into your instance. In the "configure instance details" step, set the network for your instance to be your VPC network and use the subnet you created within your VPC. You can create the subnet from the VPC dashboard.
+
+To connect to your instance, you should create an [Elastic IP address](http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/elastic-ip-addresses-eip.html) and then associate it to the eth0 interface on your instance. Go to your VPC dashboard -> Elastic IPs -> Allocate new address. Next, associate this address to the eth0 interface on your ReFlex instance after you have obtained the interface ID and private IP address by hovering over the eth0 field in the description of your instance in the EC2 dashboard.
+
+When you have successfully launched and connected to your instance, follow the ReFlex setup instructions (steps 1-6) above.
 
 
 ## Running ReFlex 
