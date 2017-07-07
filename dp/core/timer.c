@@ -463,7 +463,7 @@ timer_reinject_fgs(struct hlist_head *list, uint64_t timer_pos)
 
 
 /* derived from DPDK */
-static int
+int
 timer_calibrate_tsc(void)
 {
 	struct timespec sleeptime = {.tv_nsec = 5E8 }; /* 1/2 second */

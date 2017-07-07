@@ -704,6 +704,11 @@ static struct eth_fg *get_port_with_fdir(struct ip_tuple *id)
 	struct ix_rte_eth_dev *dev;
 	struct eth_rx_queue *queue;
 
+	ret = rte_eth_dev_filter_supported(0, RTE_ETH_FILTER_FDIR);
+        if (ret < 0) {
+		printf("WARNING: flow director not supported on this device!\n");
+		return NULL;
+	}
 
 	fdir_ftr.iptype = RTE_FDIR_IPTYPE_IPV4;
 	fdir_ftr.l4type = RTE_FDIR_L4TYPE_TCP;
@@ -723,15 +728,15 @@ static struct eth_fg *get_port_with_fdir(struct ip_tuple *id)
 	return outbound_fg();
 }
 
-// this is called by clietn on dial
+// this is called by client on dial
 struct eth_fg *get_local_port_and_set_queue(struct ip_tuple *id)
 {
 	int ret;
 	uint32_t hash;
 	uint32_t fg_idx;
 	struct eth_fg *fg;
-	struct ix_rte_eth_dev *dev;
-	struct ix_rte_eth_rss_conf rss_conf;
+	//struct ix_rte_eth_dev *dev;
+	struct rte_eth_rss_conf rss_conf;
 
 	if (rte_eth_dev_count() > 1)
 		panic("tcp_connect not implemented for bonded interfaces\n");
@@ -747,17 +752,23 @@ struct eth_fg *get_local_port_and_set_queue(struct ip_tuple *id)
 		return fg;
 	}
 
-	dev = percpu_get(eth_rxqs[0])->dev;
+	//FIXME: use this when AWS supports RSS hash key get
+	/*
+	ret = rte_eth_dev_rss_hash_conf_get(0, &rss_conf); 
 	ret = dev->dev_ops->rss_hash_conf_get(dev, &rss_conf);
-	if (ret < 0)
-		return NULL;
-
+	if (ret < 0){
+		log_info("rte_eth_dev_rss_hash_conf_get() failed\n");
+			return NULL;
+	}
+	*/
 	while (1) {
+	/*
 		if (percpu_get(local_port) >= (RTE_PER_LCORE(cpu_id) + 1) * PORTS_PER_CPU)
 			percpu_get(local_port) = RTE_PER_LCORE(cpu_id) * PORTS_PER_CPU + 1;
 		hash = compute_toeplitz_hash(rss_conf.rss_key, htonl(id->dst_ip), htonl(id->src_ip), htons(id->dst_port), htons(id->src_port));
 		fg_idx = hash & (ETH_RSS_RETA_NUM_ENTRIES - 1);
-		
+		log_info("rss config.....fg_idx is %d\n", fg_idx);
+	*/
 
 		//FIXME: need to figure out flow group stuff : do we need this code??
 		/*
@@ -768,7 +779,9 @@ struct eth_fg *get_local_port_and_set_queue(struct ip_tuple *id)
 			assert(&percpu_get(eth_rxqs[0])->dev->data->rx_fgs[fg_idx] == fgs[fg_idx]);
 			eth_fg_set_current(&percpu_get(eth_rxqs[0])->dev->data->rx_fgs[fg_idx]);
 		*/
-		
+	
+			//FIXME: this is a temporary for single-core client
+			fg_idx = percpu_get(cpu_id);	
 			return fgs[fg_idx];
 		/*
 		}
@@ -800,8 +813,10 @@ long bsys_tcp_connect(struct ip_tuple __user *id, unsigned long cookie)
 	tmp.src_ip = CFG.host_addr.addr;
 
 	struct eth_fg *cur_fg = get_local_port_and_set_queue(&tmp);
-	if (unlikely(!cur_fg))
+	if (unlikely(!cur_fg)){
+		log_info("cuf fg is null....\n");
 		return -RET_FAULT;
+	}
 	
 
 
