@@ -90,7 +90,15 @@
 #define LWIP_WND_SCALE 1
 #define TCP_RCV_SCALE 7
 #define TCP_SND_BUF 65536
-#define TCP_MSS 8960 /* Originally 1460, but now support jumbo frames */
+
+/*
+ * FIXME: TCP_MSS of 8960 causes traffic to get dropped in AWS
+ *        perhaps jumbo frames is not supported 
+ *        so conservatively set TCP_MSS to 1460 for now
+ */
+//#define TCP_MSS 8960 /* Originally 1460, but now support jumbo frames */
+#define TCP_MSS 1460
+
 //#define TCP_WND  (1024 * TCP_MSS) //Not sure what correct TCP_WND setting should be
 //#define TCP_WND  (2048 * 1460) //Not sure what correct TCP_WND setting should be
 #define TCP_WND 1<<15
