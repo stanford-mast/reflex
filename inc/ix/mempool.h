@@ -163,7 +163,7 @@ static inline void *mempool_alloc(struct mempool *m)
 	// Get memory from mempool 
 	int ret = rte_mempool_get(m->datastore->pool, &ptr);
 	if (ret){
-		log_debug("rte_mempool_get returned error %d\n", ret);
+		log_info("rte_mempool_get returned error %d\n", ret);
 		return NULL;
 	}
 	else
