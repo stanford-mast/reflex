@@ -93,6 +93,7 @@
 #include <ix/log.h>
 #include <ix/timer.h>
 
+
 static struct mempool_datastore *mempool_all_datastores;
 #ifdef ENABLE_KSTATS
 static struct timer mempool_timer;
@@ -134,10 +135,8 @@ int mempool_create_datastore(struct mempool_datastore *mds, int nr_elems, size_t
 	rte_mempool_obj_ctor_t* obj_init = NULL;
 	void* obj_init_arg = NULL;
 	int socket_id = rte_socket_id();
-	unsigned flags = MEMPOOL_F_SP_PUT | MEMPOOL_F_SC_GET; //0;
+	unsigned flags = 0; // Why does "MEMPOOL_F_SC_GET | MEMPOOL_F_SP_PUT" decrease instead of increase perf?
 	mds->pool = rte_mempool_create(name, nr_elems, elem_len, cache_size, private_data_size, mp_init, mp_init_arg, obj_init, obj_init_arg, socket_id, flags);
-	//mds->pool = rte_pktmbuf_pool_create(name, nr_elems, cache_size, 0, elem_len, rte_socket_id());
-
 	
 	mds->nr_elems = nr_elems;
 	mds->elem_len = elem_len;
@@ -257,6 +256,26 @@ int mempool_create(struct mempool *m, struct mempool_datastore *mds, int16_t san
 	return 0;
 }
 
+int mempool_create_contig_nopad(struct mempool *m, struct mempool_datastore *mds, int16_t sanity_type, int16_t sanity_id)
+{
+
+	if (mds->magic != MEMPOOL_MAGIC)
+		panic("mempool_create when datastore does not exist\n");
+
+	assert(mds->magic == MEMPOOL_MAGIC);
+
+	if (m->magic != 0)
+		panic("mempool_create attempt to call twice (ds=%s)\n", mds->prettyname);
+
+	assert(m->magic == 0);
+	m->magic = MEMPOOL_MAGIC;
+	m->datastore = mds;
+	m->sanity = (sanity_type << 16) | sanity_id;
+	m->nr_elems = mds->nr_elems;
+	m->elem_len = mds->elem_len;
+	return 0;
+}
+
 /**
  * mempool_destroy - cleans up a memory pool and frees memory
  * @m: the memory pool
@@ -294,4 +313,6 @@ int mempool_init(void)
 #endif
 	return 0;
 }
+
+
 

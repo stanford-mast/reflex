@@ -64,7 +64,6 @@
 #include <ix/list.h>
 
 #include "reflex.h" 
-#include "../drivers/nvme_impl.h"
 
 #define ROUND_UP(num, multiple) ((((num) + (multiple) - 1) / (multiple)) * (multiple))
 #define BATCH_DEPTH  512
@@ -133,8 +132,13 @@ static void send_completed_cb(struct ixev_ref *ref)
 {
 	struct nvme_req *req = container_of(ref, struct nvme_req, ref);
 	struct pp_conn *conn = req->conn;
+	int i, num4k;
 	
-	nvme_free(req->buf[0]);
+	num4k = (req->lba_count * ns_sector_size) / 4096;
+	if (((req->lba_count * ns_sector_size) % 4096) != 0)
+		num4k++;
+	for (i = 0; i < num4k; i++) 
+		mempool_free(&nvme_req_buf_pool, req->buf[i]);
 
 	mempool_free(&nvme_req_pool, req);
 	reqs_allocated--;
@@ -212,7 +216,14 @@ int send_req(struct nvme_req *req)
 		ixev_add_sent_cb(&conn->ctx, &req->ref);
 	}
 	else { //PUT
-		nvme_free(req->buf[0]);
+		int i, num4k;
+
+		num4k = (req->lba_count * ns_sector_size) / 4096;
+		if (((req->lba_count * ns_sector_size) % 4096) != 0)
+			num4k++;
+		for (i = 0; i < num4k; i++) 
+			mempool_free(&nvme_req_buf_pool, req->buf[i]);
+		mempool_free(&nvme_req_pool, req);
 		reqs_allocated--;
 		conn->sent_pkts--;
 	}
@@ -243,7 +254,22 @@ static void nvme_written_cb(struct ixev_nvme_req_ctx *ctx, unsigned int reason)
 {
 	struct nvme_req *req = container_of(ctx, struct nvme_req, ctx);
 	struct pp_conn *conn = req->conn;
-	
+	/*
+	printf("\n***WRITTEN:\n");
+	int num_bytes = req->lba_count * 512;
+	int num_4kbufs = num_bytes /4096 + 1;
+    int i, j;
+
+	for (i =0; i < num_4kbufs; i++){
+		for (j=0; j < 4096; j++){
+			if (num_bytes > i*4096 + j) {
+				//printf("%x ", *(req->buf[i]+j));
+				printf("%c", *(req->buf[i]+j));
+			}
+		}
+	}
+	printf("\n");
+	*/
 	conn->list_len++;
 	conn->in_flight_pkts--;
 	conn->sent_pkts++;
@@ -252,12 +278,29 @@ static void nvme_written_cb(struct ixev_nvme_req_ctx *ctx, unsigned int reason)
 	return;
 }
 
-
 static void nvme_response_cb(struct ixev_nvme_req_ctx *ctx, unsigned int reason)
 {
 	struct nvme_req *req = container_of(ctx, struct nvme_req, ctx);
 	struct pp_conn *conn = req->conn;
+/*	
+	int num_bytes = req->lba_count * 512;
+	int num_4kbufs = num_bytes /4096 + 1;
+	printf("\n****READ: num_bytes %d \n", num_bytes);
+    int i, j;
 
+	for (i =0; i < num_4kbufs; i++){
+		for (j=0; j < 4096; j++){
+			if (num_bytes > i*4096 + j) {
+				//printf("%x ", *(req->buf[i]+j));
+				printf("%c-", *(req->buf[i]+j));
+			}
+			else{
+				printf("\n i is %d, j %d\n", i, j);
+				break;
+			}
+		}
+	}
+*/
 	conn->list_len++;
 	conn->in_flight_pkts--;
 	conn->sent_pkts++;
@@ -345,19 +388,14 @@ static void receive_req(struct pp_conn *conn)
 			assert(num4k <= MAX_PAGES_PER_ACCESS);
 			if (((header->lba_count * ns_sector_size) % 4096) != 0)
 				num4k++;
-			
-			// SGL is currently not supported by most NVMe devices 
-			// Therefore, SGL list must be compatible with PRR list
-			// which means 4kB aligned pages and contiguous phys mem
-			uint64_t phys_addr;
-			conn->current_req->buf[0] = nvme_malloc(NULL, num4k * 4096, 4096, &phys_addr);
-			if (!conn->current_req->buf[0]) {
-				printf("Cannot allocate nvme_usr req buf. Req allocated: %lx. In flight requests: %lu sent req %lu . list len %lu \n",
-					   reqs_allocated, conn->in_flight_pkts, conn->sent_pkts, conn->list_len);
-				return;
-			}
 			for (i = 0; i < num4k; i++) {
-				conn->current_req->buf[i] = conn->current_req->buf[0] + i*4096; //nvme_malloc(NULL, 8192, 64, &phys_addr);
+				conn->current_req->buf[i] = mempool_alloc(&nvme_req_buf_pool);
+				//printf("req->buf[%d] is %p, expect next %x\n", i, conn->current_req->buf[i], (uint64_t)(conn->current_req->buf[i]) +4096); 
+				if (!conn->current_req->buf[i]) {
+					printf("Cannot allocate nvme_usr req buf. Req allocated: %lx. In flight requests: %lu sent req %lu . list len %lu \n",
+					       reqs_allocated, conn->in_flight_pkts, conn->sent_pkts, conn->list_len);
+					return;
+				}
 			}
  
 			ixev_nvme_req_ctx_init(&conn->current_req->ctx);
@@ -426,21 +464,21 @@ static void receive_req(struct pp_conn *conn)
 		switch (header->opcode) {
 		case CMD_SET:
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_WR, &nvme_written_cb);
-			//ixev_nvme_write(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
-			ixev_nvme_writev(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
-					header->lba, header->lba_count, (unsigned long)&req->ctx);
+			ixev_nvme_write(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
+			//ixev_nvme_writev(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
+			//		header->lba, header->lba_count, (unsigned long)&req->ctx);
 			conn->nvme_pending++;	
 			break;
 		case CMD_GET:
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_RD, &nvme_response_cb);
-			//ixev_nvme_read(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
-			ixev_nvme_readv(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
-					header->lba, header->lba_count, (unsigned long)&req->ctx);
+			ixev_nvme_read(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
+			//ixev_nvme_readv(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
+			//		header->lba, header->lba_count, (unsigned long)&req->ctx);
 			conn->nvme_pending++;	
 			break;
 		default:
 			printf("Received illegal msg - dropping msg\n");
-			nvme_free(req->buf[0]);
+			mempool_free(&nvme_req_buf_pool, req->buf);
 			mempool_free(&nvme_req_pool, req);
 			reqs_allocated--;
 		}
@@ -584,13 +622,11 @@ void *pp_main(void *arg)
 		return NULL;
 	}
 
-/*	
 	ret = mempool_create(&nvme_req_buf_pool, &nvme_req_buf_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret) {
 		fprintf(stderr, "unable to create mempool\n");
 		return NULL;
 	}
-*/	
 
 	ret = mempool_create(&pp_conn_pool, &pp_conn_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret) {
@@ -619,8 +655,6 @@ int reflex_server_main(int argc, char *argv[])
 		exit(-1);
 	}
 
-//	nr_cpu--; /* don't count the main thread */
-		
 	ret = mempool_create_datastore(&nvme_req_datastore, 
 				       outstanding_reqs,
 				       sizeof(struct nvme_req), "nvme_req_datastore");
@@ -628,15 +662,9 @@ int reflex_server_main(int argc, char *argv[])
 		fprintf(stderr, "unable to create datastore\n");
 		return ret;
 	}
-/*	
-	ret = mempool_create_datastore(&nvme_req_buf_datastore, 
-				       outstanding_reqs,
-				       4096, "nvme_req_buf_datastore");
-	if (ret) {
-		fprintf(stderr, "unable to create datastore\n");
-		return ret;
-	}
-*/	
+	//ret = mempool_create_datastore(&nvme_req_buf_datastore, 
+	//			       outstanding_reqs,
+	//			       4096, "nvme_req_buf_datastore");
 
 	pp_conn_pool_entries = ROUND_UP(16 * 4096, MEMPOOL_DEFAULT_CHUNKSIZE);
 
@@ -648,6 +676,14 @@ int reflex_server_main(int argc, char *argv[])
 	ret = mempool_create_datastore(&pp_conn_datastore, pp_conn_pool_entries, sizeof(struct pp_conn), "pp_conn");
 	if (ret) {
 		fprintf(stderr, "unable to create mempool\n");
+		return ret;
+	}
+	
+	ret = mempool_create_datastore_contig_nopad(&nvme_req_buf_datastore, 
+				       outstanding_reqs,
+				       4096, "nvme_req_buf_datastore");
+	if (ret) {
+		fprintf(stderr, "unable to create datastore\n");
 		return ret;
 	}
      /*	

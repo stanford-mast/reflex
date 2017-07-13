@@ -151,7 +151,7 @@ int init_nvme_request_cpu(void)
 		log_info("No NVMe devices found, skipping initialization\n");
 		return 0;
 	}
-	
+		
 	ret =  mempool_create(m, &request_datastore, MEMPOOL_SANITY_PERCPU, percpu_get(cpu_id));
 	if(ret)
 		return ret;
@@ -1238,18 +1238,18 @@ static void issue_nvme_req(struct nvme_ctx* ctx)
 
 	if (ctx->cmd == NVME_CMD_READ) {
 		// if PRP:
-		//ret = spdk_nvme_ns_cmd_read(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_read_cb, ctx, 0);
+		ret = spdk_nvme_ns_cmd_read(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_read_cb, ctx, 0);
 		// for SGL:
-		ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
-									 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
+		//ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
+		//							 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		
 	}
 	else if (ctx->cmd == NVME_CMD_WRITE) {
 		// if PRP:
-		//ret = spdk_nvme_ns_cmd_write(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_write_cb, ctx, 0);
+		ret = spdk_nvme_ns_cmd_write(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_write_cb, ctx, 0);
 		// for SGL:
-		ret = spdk_nvme_ns_cmd_writev(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
-									  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
+		//ret = spdk_nvme_ns_cmd_writev(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
+		//							  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		
 	}
 	else {
