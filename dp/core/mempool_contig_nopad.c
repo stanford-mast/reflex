@@ -360,6 +360,7 @@ rte_mempool_create_contig_nopad(const char *name, unsigned n, unsigned elt_size,
 	rte_rwlock_write_unlock(RTE_EAL_TAILQ_RWLOCK);
 	rte_rwlock_write_unlock(RTE_EAL_MEMPOOL_RWLOCK);
 	*/
+	rte_rwlock_write_unlock(RTE_EAL_MEMPOOL_RWLOCK);
 	return mp;
 
 exit_unlock:
