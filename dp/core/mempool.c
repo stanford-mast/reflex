@@ -135,7 +135,7 @@ int mempool_create_datastore(struct mempool_datastore *mds, int nr_elems, size_t
 	rte_mempool_obj_ctor_t* obj_init = NULL;
 	void* obj_init_arg = NULL;
 	int socket_id = rte_socket_id();
-	unsigned flags = 0; // Why does "MEMPOOL_F_SC_GET | MEMPOOL_F_SP_PUT" decrease instead of increase perf?
+	unsigned flags = MEMPOOL_F_SC_GET | MEMPOOL_F_SP_PUT; //NOTE: need to modify DPDK rte_mempool.h to use cache for SC/SP
 	mds->pool = rte_mempool_create(name, nr_elems, elem_len, cache_size, private_data_size, mp_init, mp_init_arg, obj_init, obj_init_arg, socket_id, flags);
 	
 	mds->nr_elems = nr_elems;

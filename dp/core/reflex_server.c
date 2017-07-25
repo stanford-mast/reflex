@@ -76,7 +76,10 @@
 #define MAX_PAGES_PER_ACCESS 256 //64
 #define PAGE_SIZE 4096
 
-static int outstanding_reqs = 4096 * 64;
+#define MAX_NUM_CONTIG_ALLOC_RETRIES 5
+
+static int outstanding_reqs = 4096 * 32; 
+static int outstanding_req_bufs = 4096 * 64;
 static unsigned long ns_size;
 static unsigned long ns_sector_size;
 
@@ -137,12 +140,15 @@ static void send_completed_cb(struct ixev_ref *ref)
 	num4k = (req->lba_count * ns_sector_size) / 4096;
 	if (((req->lba_count * ns_sector_size) % 4096) != 0)
 		num4k++;
-	for (i = 0; i < num4k; i++) 
-		mempool_free(&nvme_req_buf_pool, req->buf[i]);
+	for (i = 0; i < num4k; i++){
+		// change free order to optimize for no-reorder for mempool alloc served by cache
+		//mempool_free(&nvme_req_buf_pool, req->buf[i]);
+		mempool_free(&nvme_req_buf_pool, req->buf[num4k-1-i]); 
+	}
 
 	mempool_free(&nvme_req_pool, req);
 	reqs_allocated--;
-	conn->sent_pkts--;
+	//conn->sent_pkts--;
 }
 
 /*
@@ -225,7 +231,7 @@ int send_req(struct nvme_req *req)
 			mempool_free(&nvme_req_buf_pool, req->buf[i]);
 		mempool_free(&nvme_req_pool, req);
 		reqs_allocated--;
-		conn->sent_pkts--;
+		//conn->sent_pkts--;
 	}
 	conn->list_len--;
 	conn->tx_sent = 0;
@@ -375,6 +381,7 @@ static void receive_req(struct pp_conn *conn)
 			
 			//received the header
 			conn->current_req = mempool_alloc(&nvme_req_pool);
+			//printf("****** req ptr is %p\n", conn->current_req);
 			if (!conn->current_req) {
 				printf("Cannot allocate nvme_usr req. In flight requests: %lu sent req %lu . list len %lu \n", conn->in_flight_pkts, conn->sent_pkts, conn->list_len);
 				return;
@@ -388,15 +395,49 @@ static void receive_req(struct pp_conn *conn)
 			assert(num4k <= MAX_PAGES_PER_ACCESS);
 			if (((header->lba_count * ns_sector_size) % 4096) != 0)
 				num4k++;
+
+			void* req_buf_array[num4k];
+			int retry_count = 0;
+			bool contig; 
+retry_contig_alloc:	
+			contig = true;
 			for (i = 0; i < num4k; i++) {
-				conn->current_req->buf[i] = mempool_alloc(&nvme_req_buf_pool);
-				//printf("req->buf[%d] is %p, expect next %x\n", i, conn->current_req->buf[i], (uint64_t)(conn->current_req->buf[i]) +4096); 
-				if (!conn->current_req->buf[i]) {
-					printf("Cannot allocate nvme_usr req buf. Req allocated: %lx. In flight requests: %lu sent req %lu . list len %lu \n",
-					       reqs_allocated, conn->in_flight_pkts, conn->sent_pkts, conn->list_len);
-					return;
+				req_buf_array[i] = mempool_alloc(&nvme_req_buf_pool);
+				conn->current_req->buf[i] = req_buf_array[i];
+				//printf("req_buf_array[%d] is %p, expect next %x\n", i, req_buf_array[i], (uint64_t)(req_buf_array[i]) +4096); 
+			}
+			
+			// if necessary, remap for increasing order
+			// because cache and no-cache (ring-managed) mempool have different behavior
+			if ((unsigned int) req_buf_array[num4k-1] < (unsigned int) req_buf_array[0]){
+				for (i = 0; i  < num4k; i++) {
+					conn->current_req->buf[i] = req_buf_array[num4k-1-i];    
+					if (!conn->current_req->buf[i]) {
+						printf("Cannot allocate nvme_usr req buf. Req allocated: %lx. In flight requests: %lu sent req %lu . list len %lu \n",
+								reqs_allocated, conn->in_flight_pkts, conn->sent_pkts, conn->list_len);
+						return;
+					}
+					if (i != 0 && (unsigned int) conn->current_req->buf[i] != (unsigned int) conn->current_req->buf[i-1] + 4096){
+						printf("ERROR, not contig\n");
+						contig = false;
+						break;
+					}
 				}
 			}
+			if (contig == false){
+				//FIXME: can also try more sophisticated re-order of 4kB bufs
+				for (i = 0; i  < num4k; i++) {
+					mempool_free(&nvme_req_buf_pool, conn->current_req->buf[i]);
+				}
+				retry_count++;
+				if (retry_count == MAX_NUM_CONTIG_ALLOC_RETRIES) {
+					printf("ERROR: cannot get contiguous memory after %d tries\n", MAX_NUM_CONTIG_ALLOC_RETRIES);
+					exit(0);
+				}
+				goto retry_contig_alloc;
+			}
+
+			//printf("req buf is %p\n", conn->current_req->buf[0]);
  
 			ixev_nvme_req_ctx_init(&conn->current_req->ctx);
 
@@ -679,13 +720,16 @@ int reflex_server_main(int argc, char *argv[])
 		return ret;
 	}
 	
+	//ret = mempool_create_datastore(&nvme_req_buf_datastore, 
 	ret = mempool_create_datastore_contig_nopad(&nvme_req_buf_datastore, 
-				       outstanding_reqs,
+				       outstanding_req_bufs,
 				       4096, "nvme_req_buf_datastore");
 	if (ret) {
 		fprintf(stderr, "unable to create datastore\n");
 		return ret;
 	}
+
+
      /*	
 	sys_spawnmode(true);
 	for (i = 0; i < nr_cpu; i++) {
