@@ -53,6 +53,8 @@ struct pci_dev *g_nvme_dev;
 
 #define MAX_OPEN_BATCH 32 
 #define NUM_NVME_REQUESTS (4096 * 256)//4096 * 64 //1024
+#define SGL_PAGE_SIZE 4096 	//should match PAGE_SIZE defined in dp/core/reflex_server.c
+
 RTE_DEFINE_PER_LCORE(int, open_ev[MAX_OPEN_BATCH]);
 RTE_DEFINE_PER_LCORE(int, open_ev_ptr);
 RTE_DEFINE_PER_LCORE(struct spdk_nvme_qpair *, qpair);
@@ -1067,7 +1069,7 @@ static void sgl_reset_cb(void *cb_arg, uint32_t sgl_offset)
 {
 	struct nvme_ctx *ctx = (struct nvme_ctx *)cb_arg;
 
-	ctx->user_buf.sgl_buf.current_sgl = sgl_offset;
+	ctx->user_buf.sgl_buf.current_sgl = sgl_offset / SGL_PAGE_SIZE;
 }
 
 static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
@@ -1076,14 +1078,15 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 	void __user *__restrict temp;
 	struct nvme_ctx *ctx = (struct nvme_ctx *)cb_arg;
 
-	if (ctx->user_buf.sgl_buf.current_sgl == ctx->user_buf.sgl_buf.num_sgls) {
+	if (ctx->user_buf.sgl_buf.current_sgl >= ctx->user_buf.sgl_buf.num_sgls) {
 		*address = 0;
 		*length = 0;
 		log_info("Warning: nvme req size mismatch\n"); 
 		assert(0);
 	}
 	else {
-		temp = ctx->user_buf.sgl_buf.sgl[ctx->user_buf.sgl_buf.current_sgl++];
+		temp = ctx->user_buf.sgl_buf.sgl[ctx->user_buf.sgl_buf.current_sgl];
+		ctx->user_buf.sgl_buf.current_sgl++;
 		/*
 		paddr = (void *) vm_lookup_phys(temp, PGSIZE_2MB);
 		if (unlikely(!paddr)) {
@@ -1094,7 +1097,11 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 		//virt to phys
 		//*address = (uint64_t) ((uintptr_t) paddr + PGOFF_2MB(temp));
 		//*address = nvme_vtophys((void *)*address);
+		//temp = rte_malloc_virt2phy(temp); //FIXME: use this for rte_malloc req buf only
 		*address = nvme_vtophys((void *)temp);
+		//*address = rte_mem_virt2phy((void *)temp);
+		//printf("translated %p address is %x, current sgl is %d, num_sgls is %d, handle %lu, tid %u\n", 
+		//	   temp, *address, ctx->user_buf.sgl_buf.current_sgl -1, ctx->user_buf.sgl_buf.num_sgls, ctx->handle, ctx->tid);	
 		*length = 4096; //PGSIZE_4KB
 	}
 	return 0;
@@ -1238,18 +1245,18 @@ static void issue_nvme_req(struct nvme_ctx* ctx)
 
 	if (ctx->cmd == NVME_CMD_READ) {
 		// if PRP:
-		ret = spdk_nvme_ns_cmd_read(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_read_cb, ctx, 0);
+		//ret = spdk_nvme_ns_cmd_read(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_read_cb, ctx, 0);
 		// for SGL:
-		//ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
-		//							 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
+		ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
+									 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		
 	}
 	else if (ctx->cmd == NVME_CMD_WRITE) {
 		// if PRP:
-		ret = spdk_nvme_ns_cmd_write(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_write_cb, ctx, 0);
+		//ret = spdk_nvme_ns_cmd_write(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_write_cb, ctx, 0);
 		// for SGL:
-		//ret = spdk_nvme_ns_cmd_writev(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
-		//							  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
+		ret = spdk_nvme_ns_cmd_writev(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
+									  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		
 	}
 	else {

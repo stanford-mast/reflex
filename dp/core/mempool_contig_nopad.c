@@ -290,7 +290,7 @@ rte_mempool_create_contig_nopad(const char *name, unsigned n, unsigned elt_size,
 
 	snprintf(mz_name, sizeof(mz_name), RTE_MEMPOOL_MZ_FORMAT, name);
 
-	mz = rte_memzone_reserve(mz_name, mempool_size, socket_id, mz_flags);
+	mz = rte_memzone_reserve_aligned(mz_name, mempool_size, socket_id, mz_flags, 4096);
 	if (mz == NULL)
 		goto exit_unlock;
 

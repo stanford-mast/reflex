@@ -94,6 +94,7 @@ static __thread long reqs_allocated = 0;
 struct nvme_req {
 	struct ixev_nvme_req_ctx ctx;
 	unsigned int lba_count;
+	unsigned long lba;
 	uint16_t opcode;
 	struct pp_conn *conn;
 	struct list_node link;
@@ -141,9 +142,7 @@ static void send_completed_cb(struct ixev_ref *ref)
 	if (((req->lba_count * ns_sector_size) % 4096) != 0)
 		num4k++;
 	for (i = 0; i < num4k; i++){
-		// change free order to optimize for no-reorder for mempool alloc served by cache
-		//mempool_free(&nvme_req_buf_pool, req->buf[i]);
-		mempool_free(&nvme_req_buf_pool, req->buf[num4k-1-i]); 
+		mempool_free(&nvme_req_buf_pool, req->buf[i]); 
 	}
 
 	mempool_free(&nvme_req_pool, req);
@@ -165,12 +164,15 @@ int send_req(struct nvme_req *req)
 		header = (BINARY_HEADER *)&conn->data_send[0];
 		header->magic = sizeof(BINARY_HEADER); //RESP_PKT;
 		header->opcode = req->opcode;
+		header->lba = req->lba;
 		
 		if (req->opcode == CMD_SET)
 			header->lba_count = 0;
 		else
 			header->lba_count = req->lba_count;
 		header->req_handle = req->remote_req_handle;
+
+		assert(header->req_handle); 
 
 		while (conn->tx_sent < (sizeof(BINARY_HEADER))) {
 			ret = ixev_send(&conn->ctx, &conn->data_send[conn->tx_sent], sizeof(BINARY_HEADER) - conn->tx_sent);
@@ -227,8 +229,9 @@ int send_req(struct nvme_req *req)
 		num4k = (req->lba_count * ns_sector_size) / 4096;
 		if (((req->lba_count * ns_sector_size) % 4096) != 0)
 			num4k++;
-		for (i = 0; i < num4k; i++) 
+		for (i = 0; i < num4k; i++) {
 			mempool_free(&nvme_req_buf_pool, req->buf[i]);
+		}
 		mempool_free(&nvme_req_pool, req);
 		reqs_allocated--;
 		//conn->sent_pkts--;
@@ -261,9 +264,9 @@ static void nvme_written_cb(struct ixev_nvme_req_ctx *ctx, unsigned int reason)
 	struct nvme_req *req = container_of(ctx, struct nvme_req, ctx);
 	struct pp_conn *conn = req->conn;
 	/*
-	printf("\n***WRITTEN:\n");
 	int num_bytes = req->lba_count * 512;
 	int num_4kbufs = num_bytes /4096 + 1;
+	printf("\n***WRITTEN: num_bytes %d, lba_count %u \n", num_bytes, req->lba_count);
     int i, j;
 
 	for (i =0; i < num_4kbufs; i++){
@@ -288,10 +291,11 @@ static void nvme_response_cb(struct ixev_nvme_req_ctx *ctx, unsigned int reason)
 {
 	struct nvme_req *req = container_of(ctx, struct nvme_req, ctx);
 	struct pp_conn *conn = req->conn;
-/*	
+	
+/*
 	int num_bytes = req->lba_count * 512;
 	int num_4kbufs = num_bytes /4096 + 1;
-	printf("\n****READ: num_bytes %d \n", num_bytes);
+	printf("\n****READ: num_bytes %d, lba_count %u \n", num_bytes, req->lba_count);
     int i, j;
 
 	for (i =0; i < num_4kbufs; i++){
@@ -391,52 +395,22 @@ static void receive_req(struct pp_conn *conn)
 			header = (BINARY_HEADER *)&conn->data_recv[0];
 			
 			assert(header->magic == sizeof(BINARY_HEADER));
+
 			num4k = (header->lba_count * ns_sector_size) / 4096;
 			assert(num4k <= MAX_PAGES_PER_ACCESS);
 			if (((header->lba_count * ns_sector_size) % 4096) != 0)
 				num4k++;
 
 			void* req_buf_array[num4k];
-			int retry_count = 0;
-			bool contig; 
-retry_contig_alloc:	
-			contig = true;
 			for (i = 0; i < num4k; i++) {
 				req_buf_array[i] = mempool_alloc(&nvme_req_buf_pool);
+				if (req_buf_array[i] == NULL){
+					printf("ERROR: alloc of nvme_req_buf failed\n");
+					assert(0);
+				}
 				conn->current_req->buf[i] = req_buf_array[i];
 				//printf("req_buf_array[%d] is %p, expect next %x\n", i, req_buf_array[i], (uint64_t)(req_buf_array[i]) +4096); 
 			}
-			
-			// if necessary, remap for increasing order
-			// because cache and no-cache (ring-managed) mempool have different behavior
-			if ((unsigned int) req_buf_array[num4k-1] < (unsigned int) req_buf_array[0]){
-				for (i = 0; i  < num4k; i++) {
-					conn->current_req->buf[i] = req_buf_array[num4k-1-i];    
-					if (!conn->current_req->buf[i]) {
-						printf("Cannot allocate nvme_usr req buf. Req allocated: %lx. In flight requests: %lu sent req %lu . list len %lu \n",
-								reqs_allocated, conn->in_flight_pkts, conn->sent_pkts, conn->list_len);
-						return;
-					}
-					if (i != 0 && (unsigned int) conn->current_req->buf[i] != (unsigned int) conn->current_req->buf[i-1] + 4096){
-						printf("ERROR, not contig\n");
-						contig = false;
-						break;
-					}
-				}
-			}
-			if (contig == false){
-				//FIXME: can also try more sophisticated re-order of 4kB bufs
-				for (i = 0; i  < num4k; i++) {
-					mempool_free(&nvme_req_buf_pool, conn->current_req->buf[i]);
-				}
-				retry_count++;
-				if (retry_count == MAX_NUM_CONTIG_ALLOC_RETRIES) {
-					printf("ERROR: cannot get contiguous memory after %d tries\n", MAX_NUM_CONTIG_ALLOC_RETRIES);
-					exit(0);
-				}
-				goto retry_contig_alloc;
-			}
-
 			//printf("req buf is %p\n", conn->current_req->buf[0]);
  
 			ixev_nvme_req_ctx_init(&conn->current_req->ctx);
@@ -489,6 +463,7 @@ retry_contig_alloc:
 
 		req->opcode = header->opcode;
 		req->lba_count = header->lba_count;
+		req->lba = header->lba;
 		req->remote_req_handle = header->req_handle;
 				
 		req->ctx.handle = handle;
@@ -505,16 +480,16 @@ retry_contig_alloc:
 		switch (header->opcode) {
 		case CMD_SET:
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_WR, &nvme_written_cb);
-			ixev_nvme_write(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
-			//ixev_nvme_writev(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
-			//		header->lba, header->lba_count, (unsigned long)&req->ctx);
+			//ixev_nvme_write(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
+			ixev_nvme_writev(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
+					header->lba, header->lba_count, (unsigned long)&req->ctx);
 			conn->nvme_pending++;	
 			break;
 		case CMD_GET:
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_RD, &nvme_response_cb);
-			ixev_nvme_read(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
-			//ixev_nvme_readv(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
-			//		header->lba, header->lba_count, (unsigned long)&req->ctx);
+			//ixev_nvme_read(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
+			ixev_nvme_readv(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
+					header->lba, header->lba_count, (unsigned long)&req->ctx);
 			conn->nvme_pending++;	
 			break;
 		default:
