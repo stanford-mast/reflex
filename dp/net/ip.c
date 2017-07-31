@@ -159,8 +159,7 @@ void eth_input_process(struct rte_mbuf *pkt, int nb_pkts){
 	fg = fgs[percpu_get(cpu_id)]; //FIXME: figure out flow group stuff
 	eth_fg_set_current(fg);
 
-	log_debug("ip: got ethernet packet of len %ld, type %x\n",
-		  pkt->buf_len, ntoh16(ethhdr->type));
+	assert(nb_pkts == 1); 
 
 	if (ethhdr->type == hton16(ETHTYPE_IP)){
 		ip_input(fg, pkt, mbuf_nextd(ethhdr, struct ip_hdr *));
@@ -285,13 +284,13 @@ int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct rte_mbuf
 
 	txq = percpu_get(eth_txqs)[cur_fg->dev_idx];
 
-	//ret = eth_send_one(txq, pkt, len); //FIXME: bring this back
-	pkt->data_len = len; // rte_pktmbuf_pkt_len(pkt);
-	pkt->pkt_len = len; // rte_pktmbuf_pkt_len(pkt);
-	ret = rte_eth_tx_burst(0, percpu_get(cpu_id), &pkt, 1);
-	if (unlikely(ret < 1)) {
+	pkt->data_len = len; 
+	pkt->pkt_len = len; 
+	//printf("ip_send_one: len %u, pkt %p, dst_addr is %x\n", len, pkt, dst_addr->addr);
+	ret = rte_eth_tx_buffer(0, percpu_get(cpu_id), percpu_get(tx_buf), pkt); 
+
+	if (unlikely(ret < 0)) {
 		printf("ip_send_one: tx ret is %d\n", ret);
-		rte_pktmbuf_free(pkt);
 		return -EIO;
 	}
 

@@ -96,6 +96,19 @@ struct eth_rx_queue {
 	struct rte_eth_dev *dev;
 };
 
+
+RTE_DECLARE_PER_LCORE(struct rte_eth_dev_tx_buffer*, tx_buf);
+
+/**
+ * ethdev_init_cpu - initializes the core-local tx buffer 
+ *
+ * Returns 0 if successful, otherwise failure.
+ */
+
+int ethdev_init_cpu(void);
+
+
+
 /**
  * eth_rx_poll - recieve pending packets on an RX queue
  * @rx: the RX queue

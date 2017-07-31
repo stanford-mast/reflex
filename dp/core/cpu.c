@@ -102,8 +102,6 @@ struct cpu_runlist {
 	struct cpu_runner *next_runner;
 } __aligned(CACHE_LINE_SIZE);
 
-static RTE_DEFINE_PER_LCORE(struct cpu_runlist, runlist);
-
 #define MAX_LCORES 128
 static struct cpu_runlist global_runlists[MAX_LCORES];
 
@@ -146,7 +144,7 @@ int cpu_run_on_one(cpu_func_t func, void *data, unsigned int cpu)
  */
 void cpu_do_bookkeeping(void)
 {
-	struct cpu_runlist *rlist = &percpu_get(runlist);
+	struct cpu_runlist *rlist = &global_runlists[percpu_get(cpu_id)];
 	struct cpu_runner *runner;
 
 	if (rlist->next_runner) {

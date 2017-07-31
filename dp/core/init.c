@@ -71,6 +71,7 @@
 #include <ix/errno.h>
 //#include <ix/pci.h>
 #include <ix/ethdev.h>
+#include <ix/ethqueue.h>
 #include <ix/timer.h>
 #include <ix/cpu.h>
 #include <ix/mbuf.h>
@@ -136,7 +137,7 @@ static struct init_vector_t init_tbl[] = {
 	{ "mbuf",    mbuf_init,    mbuf_init_cpu, NULL},      // after firstcpu
 	{ "memp",    memp_init,    memp_init_cpu, NULL},
 	{ "tcpapi",  tcp_api_init, tcp_api_init_cpu, NULL},
-	{ "ethdev",  init_ethdev,  NULL, NULL},
+	{ "ethdev",  init_ethdev,  ethdev_init_cpu, NULL},
 	{ "nvmemem", init_nvme_request, init_nvme_request_cpu, NULL},
 	{ "migration", NULL, init_migration_cpu, NULL},
 	{ "nvmedev", init_nvmedev, NULL, NULL},               // before per-cpu init

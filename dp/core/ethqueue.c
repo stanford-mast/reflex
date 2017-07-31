@@ -116,8 +116,8 @@ int eth_process_poll(void)
 	bool empty;
 	struct rte_mbuf *m;
 
-	struct rte_mbuf *rx_pkts[MAX_NUM_IO_QUEUES]; //TODO: test with multiqueue (multicore), assumes 1 pkt recv at a time
-
+	struct rte_mbuf *rx_pkts[MAX_NUM_IO_QUEUES]; //TODO: test with multi queue, multicore; assumes 1 pkt recv at a time
+	
 	/*
 	 * We round robin through each queue one packet at
 	 * a time for fairness, and stop when all queues are
@@ -271,7 +271,37 @@ int eth_process_recv(void)
 	return empty;
 }
 
-RTE_DEFINE_PER_LCORE(struct rte_eth_dev_tx_buffer, tx_buf);
+
+RTE_DEFINE_PER_LCORE(struct rte_eth_dev_tx_buffer*, tx_buf);
+/**
+ * ethdev_init_cpu - initializes the core-local tx buffer 
+ *
+ * Returns 0 if successful, otherwise failure.
+ */
+
+int ethdev_init_cpu(void)
+{
+	int ret;
+	struct rte_eth_dev_tx_buffer* tx_buffer = percpu_get(tx_buf);
+
+	tx_buffer = rte_zmalloc_socket("tx_buffer",
+			RTE_ETH_TX_BUFFER_SIZE(eth_rx_max_batch), 0,
+			rte_eth_dev_socket_id(0));
+	if (tx_buffer == NULL){
+		log_err("ERROR: cannot allocate buffer for tx \n");
+		exit(0);
+	}
+
+	ret = rte_eth_tx_buffer_init(tx_buffer, eth_rx_max_batch);
+	if (ret){
+		log_err("ERROR in tx buffer init\n");
+		exit(0);
+	}
+	percpu_get(tx_buf) = tx_buffer;
+}
+
+
+
 
 /**
  * eth_process_send - processes packets pending to be sent
@@ -283,22 +313,7 @@ void eth_process_send(void)
 
 
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-		
-		//TODO: eth_process_send: figure out tx_pkts and nb_pkts for rte_eth_tx_burst
-		//rte_eth_tx_burst(uint8_t port_id, uint16_t queue_id,
-		//	 struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
-		//rte_eth_tx_burst(0, i, tx_pkts, nb_pkts );
-		//
-		rte_eth_tx_buffer_flush(0, i, &percpu_get(tx_buf));
-		/*
-		txq = percpu_get(eth_txqs[i]);
-
-		nr = eth_tx_xmit(txq, txq->len, txq->bufs);
-		if (unlikely(nr != txq->len))
-			panic("transmit buffer size mismatch\n");
-
-		txq->len = 0;
-		*/
+		rte_eth_tx_buffer_flush(0, i, percpu_get(tx_buf)); 
 	}
 }
 

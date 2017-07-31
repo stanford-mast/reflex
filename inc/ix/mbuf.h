@@ -216,24 +216,6 @@ struct mbuf {
 	 
 //rte_pktmbuf_data_len(mbuf->dpdk_mbuf))
 
-/**
- * mbuf_to_iomap - determines the address in the IOMAP region
- * @mbuf: the mbuf
- * @pos: a pointer within the mbuf
- *
- * Returns an address.
- */
-#define mbuf_to_iomap(mbuf, pos) mempool_pagemem_to_iomap(&percpu_get(mbuf_mempool), pos)
-
-/**
- * iomap_to_mbuf - determines the mbuf pointer based on the IOMAP address
- * @pool: the containing memory pool
- * @pos: the IOMAP pointer
- *
- * Returns an address.
- */
-#define iomap_to_mbuf(pool, pos) mempool_iomap_to_ptr(pool, pos)
-
 extern void mbuf_default_done(struct mbuf *m);
 
 RTE_DECLARE_PER_LCORE(struct mempool, mbuf_mempool);
@@ -250,24 +232,10 @@ static inline struct rte_mbuf *mbuf_alloc(struct mempool *pool, int socket)
 	if (unlikely(!dpdk_mbuf))
 		return NULL;
 
-/*	
-	dpdk_mbuf->data_len = 0;
+	dpdk_mbuf->data_len = 0; 
 	dpdk_mbuf->pkt_len = 0;
 	dpdk_mbuf->next = NULL;
-
-	// TODO: ix_mbuf is allocated on a socket heap. Maybe it should have its own mempool
-	struct mbuf *ix_mbuf = (struct mbuf *) rte_zmalloc_socket(NULL, sizeof(struct mbuf), 0, socket);
-	if (unlikely(!ix_mbuf))
-		return NULL;
-
-	ix_mbuf->next = NULL;
-	ix_mbuf->done = &mbuf_default_done;
-
-	// Assign new rte mbuf to an ix mbuf
-	ix_mbuf->dpdk_mbuf = dpdk_mbuf;
-
-	return ix_mbuf;
-	*/
+	
 	return dpdk_mbuf;
 }
 
@@ -277,11 +245,7 @@ static inline struct rte_mbuf *mbuf_alloc(struct mempool *pool, int socket)
  */
 static inline void mbuf_free(struct rte_mbuf *m)
 {
-	// Put rte_mbuf back into mempool
-	//rte_pktmbuf_free(&percpu_get(mbuf_mempool), m->dpdk_mbuf);
-	//rte_pktmbuf_free(m->dpdk_mbuf);
 	rte_pktmbuf_free(m);
-	//rte_free(m);
 }
 
 /**
@@ -292,8 +256,6 @@ static inline void mbuf_free(struct rte_mbuf *m)
  */
 static inline struct rte_mbuf* mbuf_get_data_machaddr(struct rte_mbuf *m)
 {
-	//return page_machaddr(mbuf_mtod(m, void *));
-	//log_info("****************** mbuf_get_data_machaddr (which doesn't give machaddr anymore)*********** \n");
 	return mbuf_mtod(m, void*);
 }
 

@@ -97,9 +97,10 @@ static int icmp_reflect(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct icmp
 	pkt->pkt_len = rte_pktmbuf_pkt_len(pkt);
 	pkt->data_len = rte_pktmbuf_pkt_len(pkt);
 
-	ret = rte_eth_tx_burst(0, 0, &pkt, 1);
+	ret = rte_eth_tx_buffer(0, 0, percpu_get(tx_buf), pkt); 
 
-	if (unlikely(ret < 1)) {
+	//if (unlikely(ret < 1)) {
+	if (unlikely(ret < 0)) {
 		printf("Warning: could not send ICMP reply\n");
 		rte_pktmbuf_free(pkt);
 		return -EIO;
