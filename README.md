@@ -69,7 +69,7 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
    sudo insmod deps/pcidma/pcidma.ko
    
    sudo insmod deps/dpdk/build/kmod/igb_uio.ko
-   sudo deps/dpdk/tools/dpdk_nic_bind.py --bind=igb_uio 0000:06:00.0   # insert device PCI address here!!! 
+   sudo deps/dpdk/usertools/dpdk-devbind.py --bind=igb_uio 0000:06:00.0   # insert device PCI address here!!! 
    ```
    
 6. Precondition the SSD and derive the request cost model:
