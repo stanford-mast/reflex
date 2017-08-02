@@ -178,7 +178,6 @@ int parse_fdir(void)
 	int i, ret;
 
 	struct rte_eth_fdir_filter filter;
-	struct rte_fdir_filter dir_filter;
 
 	memset(&filter, 0, sizeof(struct rte_eth_fdir_filter));
 

@@ -700,7 +700,7 @@ static void remove_fdir_filter(struct ip_tuple *id)
 static struct eth_fg *get_port_with_fdir(struct ip_tuple *id)
 {
 	int ret;
-	struct rte_fdir_filter fdir_ftr;
+	struct rte_eth_fdir_filter filter;
 	struct ix_rte_eth_dev *dev;
 	struct eth_rx_queue *queue;
 
@@ -710,6 +710,26 @@ static struct eth_fg *get_port_with_fdir(struct ip_tuple *id)
 		return NULL;
 	}
 
+	filter.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_TCP;
+	filter.input.flow.tcp4_flow.ip.src_ip = hton32(id->dst_ip); 
+	filter.input.flow.tcp4_flow.ip.dst_ip = hton32(id->src_ip); // tos, ttl?
+	filter.input.flow.tcp4_flow.src_port = 0; 
+	filter.input.flow.tcp4_flow.dst_port = hton16(id->src_port);
+	filter.soft_id = 0;
+	filter.action.rx_queue = percpu_get(cpu_id); //FIXME: or should this always be 0? 
+	filter.action.behavior = RTE_ETH_FDIR_ACCEPT; 
+	filter.action.report_status = RTE_ETH_FDIR_REPORT_ID;
+
+	ret = rte_eth_dev_filter_ctrl(0, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, &filter);
+	if (ret < 0) {
+		log_err("cfg: failed to add FDIR rule, ret %d.\n", ret);
+		return ret;
+	}
+	log_info("FDIR: dst_ip %x, src_ip %x, dst_port %d <-- queue (core) %d\n", 
+			 filter.input.flow.tcp4_flow.ip.dst_ip, filter.input.flow.tcp4_flow.ip.src_ip, 
+			 filter.input.flow.tcp4_flow.dst_port, filter.action.rx_queue);
+
+/*
 	fdir_ftr.iptype = RTE_FDIR_IPTYPE_IPV4;
 	fdir_ftr.l4type = RTE_FDIR_L4TYPE_TCP;
 	fdir_ftr.ip_src.ipv4_addr = id->dst_ip;
@@ -726,6 +746,9 @@ static struct eth_fg *get_port_with_fdir(struct ip_tuple *id)
 
 	eth_fg_set_current(outbound_fg());
 	return outbound_fg();
+*/
+	return fgs[percpu_get(cpu_id)];
+
 }
 
 // this is called by client on dial
