@@ -21,7 +21,7 @@
 
 # Makefile for the core system
 
-SRC = ethfg.c ethqueue.c cfg.c control_plane.c cpu.c init.c log.c mbuf.c mempool.c mempool_contig_nopad.c pci.c utimer.c syscall.c timer.c dpdk.c nvme_sw_queue.c echoserver.c reflex_server.c reflex_ix_client.c
+SRC = ethfg.c ethqueue.c cfg.c control_plane.c cpu.c init.c log.c mbuf.c mempool.c pci.c utimer.c syscall.c timer.c dpdk.c nvme_sw_queue.c echoserver.c reflex_server.c reflex_ix_client.c
 
 ifneq ($(ENABLE_KSTATS),)
 SRC += kstats.c tailqueue.c

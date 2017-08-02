@@ -286,8 +286,7 @@ nvme_driver_init(struct rte_pci_driver *dr, struct rte_pci_device *rte_dev)
 }
 
 static struct rte_pci_driver nvme_rte_driver = {
-	.name = "nvme_driver",
-	.devinit = nvme_driver_init,
+	.probe = nvme_driver_init,
 	.id_table = nvme_pci_driver_id,
 	.drv_flags = RTE_PCI_DRV_NEED_MAPPING,
 };

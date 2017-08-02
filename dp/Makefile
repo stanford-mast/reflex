@@ -72,10 +72,11 @@ ifneq ($(MAKECMDGOALS),clean)
 endif
 
 DPDK_LIBS=
-DPDK_LIBS+=-Wl,-whole-archive $(DPDK)/build/lib/librte_pmd_ixgbe.a $(DPDK)/build/lib/librte_pmd_ena.a  -Wl,-no-whole-archive
+DPDK_LIBS+=-Wl,-whole-archive $(DPDK)/build/lib/librte_pmd_ixgbe.a $(DPDK)/build/lib/librte_pmd_ena.a $(DPDK)/build/lib/librte_mempool_ring.a -Wl,-no-whole-archive
 DPDK_LIBS+=$(DPDK)/build/lib/librte_mbuf.a
-DPDK_LIBS+=$(DPDK)/build/lib/libethdev.a
+DPDK_LIBS+=$(DPDK)/build/lib/librte_ethdev.a
 DPDK_LIBS+=$(DPDK)/build/lib/librte_mempool.a
+DPDK_LIBS+=$(DPDK)/build/lib/librte_hash.a
 DPDK_LIBS+=$(DPDK)/build/lib/librte_ring.a
 DPDK_LIBS+=$(DPDK)/build/lib/librte_eal.a
 
@@ -85,8 +86,6 @@ SPDK_LIBS+=$(SPDK)/lib/memory/libspdk_memory.a
 
 IX_LIBS+=../libix/libix.a
 
-#ix: $(DEPENDENCY) $(OBJS) $(DUNE_LIB) ix.ld
-#	$(LD) $(LDFLAGS) -o ix $(OBJS) $(DUNE_LIB) $(SPDK_LIBS) $(DPDK_LIBS) $(LDLIBS) $(IX_LIBS)
 ix: $(DEPENDENCY) $(OBJS) ix.ld
 	$(LD) $(LDFLAGS) -o ix $(OBJS) $(SPDK_LIBS) $(DPDK_LIBS) $(LDLIBS) $(IX_LIBS)
 clean:

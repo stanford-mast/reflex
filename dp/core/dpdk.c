@@ -67,6 +67,8 @@
 
 /* General DPDK includes */
 #include <rte_config.h>
+#include <rte_common.h>
+#include <rte_mempool.h>
 #include <eal_internal_cfg.h>
 #include <rte_ethdev.h>
 #include <rte_mbuf.h>
@@ -77,10 +79,6 @@
 
 struct rte_mempool *dpdk_pool;
 
-enum {
-	DEV_DETACHED = 0,
-	DEV_ATTACHED
-};
 #define MEMPOOL_CACHE_SIZE 256
 
 int dpdk_init(void)
@@ -93,8 +91,8 @@ int dpdk_init(void)
 	/* pool_size sets an implicit limit on cores * NICs that DPDK allows */
 	const int pool_size = 32768;
 
-	optind = 0;
-	internal_config.no_hugetlbfs = 0;
+	//optind = 0;
+	//internal_config.no_hugetlbfs = 0;
 	ret = rte_eal_init(sizeof(argv) / sizeof(argv[0]), argv);
 	if (ret < 0)
 		return ret;
@@ -106,13 +104,3 @@ int dpdk_init(void)
 	return 0;
 }
 
-uint8_t rte_eth_dev_find_free_port(void)
-{
-	unsigned i;
-
-	for (i = 0; i < RTE_MAX_ETHPORTS; i++) {
-		if (rte_eth_devices[i].attached == DEV_DETACHED)
-			return i;
-	}
-	return RTE_MAX_ETHPORTS;
-}

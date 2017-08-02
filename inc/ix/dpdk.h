@@ -54,4 +54,3 @@
 
 extern struct rte_mempool *dpdk_pool;
 
-uint8_t rte_eth_dev_find_free_port(void);

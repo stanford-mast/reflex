@@ -206,6 +206,7 @@ static inline uintptr_t mempool_ptr_to_idx(struct mempool *m, void *p, int elem_
 
 
 extern int mempool_create_datastore(struct mempool_datastore *m, int nr_elems, size_t elem_len, const char *prettyname);
+extern int mempool_create_datastore_align(struct mempool_datastore *m, int nr_elems, size_t elem_len, const char *prettyname);
 extern int mempool_create_datastore_contig_nopad(struct mempool_datastore *m, int nr_elems, size_t elem_len, const char *prettyname);
 extern int mempool_create(struct mempool *m, struct mempool_datastore *mds, int16_t sanity_type, int16_t sanity_id);
 extern void mempool_destroy(struct mempool *m);

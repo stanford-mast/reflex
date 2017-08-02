@@ -78,8 +78,8 @@
 
 #define MAX_NUM_CONTIG_ALLOC_RETRIES 5
 
-static int outstanding_reqs = 4096 * 32; 
-static int outstanding_req_bufs = 4096 * 64;
+static int outstanding_reqs = 4096 * 64; 
+static int outstanding_req_bufs = 4096 * 64; //4096 * 64;
 static unsigned long ns_size;
 static unsigned long ns_sector_size;
 
@@ -147,7 +147,6 @@ static void send_completed_cb(struct ixev_ref *ref)
 
 	mempool_free(&nvme_req_pool, req);
 	reqs_allocated--;
-	//conn->sent_pkts--;
 }
 
 /*
@@ -225,7 +224,6 @@ int send_req(struct nvme_req *req)
 	}
 	else { //PUT
 		int i, num4k;
-
 		num4k = (req->lba_count * ns_sector_size) / 4096;
 		if (((req->lba_count * ns_sector_size) % 4096) != 0)
 			num4k++;
@@ -385,7 +383,6 @@ static void receive_req(struct pp_conn *conn)
 			
 			//received the header
 			conn->current_req = mempool_alloc(&nvme_req_pool);
-			//printf("****** req ptr is %p\n", conn->current_req);
 			if (!conn->current_req) {
 				printf("Cannot allocate nvme_usr req. In flight requests: %lu sent req %lu . list len %lu \n", conn->in_flight_pkts, conn->sent_pkts, conn->list_len);
 				return;
@@ -494,7 +491,6 @@ static void receive_req(struct pp_conn *conn)
 			break;
 		default:
 			printf("Received illegal msg - dropping msg\n");
-			mempool_free(&nvme_req_buf_pool, req->buf);
 			mempool_free(&nvme_req_pool, req);
 			reqs_allocated--;
 		}
@@ -638,11 +634,13 @@ void *pp_main(void *arg)
 		return NULL;
 	}
 
+	
 	ret = mempool_create(&nvme_req_buf_pool, &nvme_req_buf_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret) {
 		fprintf(stderr, "unable to create mempool\n");
 		return NULL;
 	}
+	
 
 	ret = mempool_create(&pp_conn_pool, &pp_conn_datastore, MEMPOOL_SANITY_GLOBAL, 0);
 	if (ret) {
@@ -678,10 +676,7 @@ int reflex_server_main(int argc, char *argv[])
 		fprintf(stderr, "unable to create datastore\n");
 		return ret;
 	}
-	//ret = mempool_create_datastore(&nvme_req_buf_datastore, 
-	//			       outstanding_reqs,
-	//			       4096, "nvme_req_buf_datastore");
-
+	
 	pp_conn_pool_entries = ROUND_UP(16 * 4096, MEMPOOL_DEFAULT_CHUNKSIZE);
 
 	ixev_init_conn_nvme(&pp_conn_ops, &nvme_ops);
@@ -695,26 +690,14 @@ int reflex_server_main(int argc, char *argv[])
 		return ret;
 	}
 	
-	//ret = mempool_create_datastore(&nvme_req_buf_datastore, 
-	ret = mempool_create_datastore_contig_nopad(&nvme_req_buf_datastore, 
+	ret = mempool_create_datastore_align(&nvme_req_buf_datastore, 
 				       outstanding_req_bufs,
 				       4096, "nvme_req_buf_datastore");
+
 	if (ret) {
 		fprintf(stderr, "unable to create datastore\n");
 		return ret;
 	}
-
-
-     /*	
-	sys_spawnmode(true);
-	for (i = 0; i < nr_cpu; i++) {
-		if (pthread_create(&tid, NULL, pp_main, NULL)) {
-			fprintf(stderr, "failed to spawn thread %d\n", i);
-			exit(-1);
-		}
-	}
-	printf("Started ReFlex server with %i threads..\n", nr_cpu + 1);
-	*/
 
 
 	for (i = 1; i < nr_cpu; i++) {

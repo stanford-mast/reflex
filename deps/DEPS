@@ -3,7 +3,7 @@
 # Three lines of non-changing
 # comments so that git can
 # automatically merge this file.
-git://dpdk.org/dpdk dpdk v16.04
+git://dpdk.org/dpdk dpdk f4709b40940395b29521d6e5e36b58c516a74b29
 
 # Three lines of non-changing
 # comments so that git can
