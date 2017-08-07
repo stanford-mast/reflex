@@ -6,7 +6,10 @@ ReFlex is an extension of the [IX dataplace operating system](https://github.com
 
 In the kernel implementation (available in the [master](https://github.com/stanford-mast/reflex/tree/master) branch), the ReFlex kernel runs as a guest OS in Linux and relies on the [Dune](https://github.com/project-dune/dune) kernel for memory management and direct access to hardware (e.g., NIC and NVMe Flash queues) from userspace applications. This is the original implementation of ReFlex, as presented in the [paper](https://web.stanford.edu/group/mast/cgi-bin/drupal/system/files/reflex_asplos17.pdf) published at ASPLOS'17. 
 
-In the userspace implementation (available in the ([userspace](https://github.com/stanford-mast/reflex/tree/userspace) branch), network and storage processing is implemented in userspace and ReFlex uses the standard `igb_uio` module to bind a network device to a DPDK-provided network device driver. The userspace version of ReFlex does not require the Dune kernel module to be loaded. This means the userspace version of ReFlex is simpler to deploy.  
+In the userspace implementation (available in the [userspace](https://github.com/stanford-mast/reflex/tree/userspace) branch), network and storage processing is implemented in userspace and ReFlex uses the standard `igb_uio` module to bind a network device to a DPDK-provided network device driver. The userspace version of ReFlex does not require the Dune kernel module to be loaded. This means the userspace version of ReFlex is simpler to deploy.  
+
+
+### For userspace version of ReFlex, go to the [userspace branch](https://github.com/stanford-mast/reflex/tree/userspace) of this repository.
 
 
 ## Requirements for kernel version of ReFlex
