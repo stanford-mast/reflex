@@ -40,7 +40,6 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
 
    ```
    sudo chmod +r /boot/System.map-`uname -r`
-   make -sj64 -C deps/pcidma
    make -sj64 -C deps/dpdk config T=x86_64-native-linuxapp-gcc
    make -sj64 -C deps/dpdk
     # Add the full path to your DPDK build folder in deps/spdk/CONFIG. It should be added to the CONFIG_DPDK_DIR variable 
@@ -66,7 +65,6 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
    sudo modprobe -r ixgbe
    sudo modprobe -r nvme
    sudo modprobe uio
-   sudo insmod deps/pcidma/pcidma.ko
    
    sudo insmod deps/dpdk/build/kmod/igb_uio.ko
    sudo deps/dpdk/tools/dpdk_nic_bind.py --bind=igb_uio 0000:06:00.0   # insert device PCI address here!!! 
