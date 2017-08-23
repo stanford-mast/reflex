@@ -573,7 +573,7 @@ static struct ixev_conn_ops pp_conn_ops = {
 	.dialed         = &pp_dialed,
 };
 
-static void *receive_loop(void *arg)
+static void* receive_loop(void *arg)
 {
 	int ret, i;
 	int flags;
@@ -772,7 +772,8 @@ int reflex_client_main(int argc, char *argv[])
 		//ret = pthread_create(&tid, NULL, start_cpu, (void *)(unsigned long) i);
 		log_info("rte_eal_remote_launch...receive_loop\n");
 		tid[i] = i;
-		ret = rte_eal_remote_launch(receive_loop, (void *)(unsigned long) i, i);		
+		//ret = rte_eal_remote_launch(receive_loop, (void *)(unsigned long) i, i);		
+		ret = rte_eal_remote_launch(receive_loop, &tid[i], i);		
 
 		if (ret) {
 			log_err("init: unable to start app\n");
