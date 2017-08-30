@@ -39,7 +39,6 @@
 #include <ix/nvmedev.h>
 #include <ix/mempool.h>
 #include <ix/nvme_sw_queue.h>
-#include "nvme_impl.h"
 #include <ix/atomic.h>
 
 #include <spdk/nvme.h>
@@ -101,20 +100,6 @@ static int nvme_compute_req_cost(int req_type, size_t req_len);
 
 static void set_token_deficit_limit(void);
 
-struct nvme_request * alloc_local_nvme_request(struct nvme_request **req)
-{
-	*req =  mempool_alloc(&percpu_get(request_mempool));
-	if(*req == NULL)
-		log_info("Ran out of nvme requests\n");
-	assert(*req);
-	return *req;
-}
-
-void free_local_nvme_request(struct nvme_request *req)
-{
-	mempool_free(&percpu_get(request_mempool),req);
-}
-
 struct nvme_ctx * alloc_local_nvme_ctx(void)
 {
 	return mempool_alloc(&percpu_get(ctx_mempool));
@@ -142,7 +127,6 @@ void free_local_nvme_swq(struct nvme_sw_queue *q)
 int init_nvme_request_cpu(void)
 {
 	struct nvme_tenant_mgmt* thread_tenant_manager;
-	struct mempool *m = &percpu_get(request_mempool);
 	int ret;
 
 	if (percpu_get(mempool_initialized)) {
@@ -150,14 +134,10 @@ int init_nvme_request_cpu(void)
 	}
 
 	if (CFG.num_nvmedev == 0) {
-		log_info("No NVMe devices found, skipping initialization\n");
+		printf("No NVMe devices found, skipping initialization\n");
 		return 0;
 	}
 		
-	ret =  mempool_create(m, &request_datastore, MEMPOOL_SANITY_PERCPU, percpu_get(cpu_id));
-	if(ret)
-		return ret;
-
 	struct mempool *m2 = &percpu_get(ctx_mempool);
 	ret = mempool_create(m2, &ctx_datastore, MEMPOOL_SANITY_PERCPU, percpu_get(cpu_id));
 	if(ret) {
@@ -203,21 +183,6 @@ int init_nvme_request(void)
 	if (CFG.num_nvmedev == 0) {
 		return 0;
 	}
-	
-	ret = mempool_create_datastore(m, NUM_NVME_REQUESTS, spdk_nvme_request_size(), "nvme_request");
-	if (ret) {
-		return ret;
-	}
-	
-	
-	//ret = mempool_pagemem_map_to_user(m);
-	
-	if (ret) {
-		//mempool_pagemem_destroy(m);
-		mempool_destroy_datastore(m);
-		return ret;
-	}
-	
 
 	ret = mempool_create_datastore(m2, NUM_NVME_REQUESTS, sizeof(struct nvme_ctx), "nvme_ctx");
 	if (ret) {
@@ -265,13 +230,13 @@ void nvme_request_exit_cpu(void)
 static bool
 probe_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr_opts *opts)
 {
-	log_info("probe return\n"); 
+	printf("probe return\n"); 
 	if (dev == NULL) {
 		log_err("nvmedev: failed to start driver\n");
 		return -ENODEV;
 	}
 
-	log_info("attaching to nvme device\n");
+	printf("attaching to nvme device\n");
 	return true;
 }
 
@@ -288,19 +253,19 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
 
 	if (!spdk_nvme_ns_is_active(ns)) {
-		log_info("Controller %-20.20s (%-20.20s): Skipping inactive NS %u\n",
+		printf("Controller %-20.20s (%-20.20s): Skipping inactive NS %u\n",
 		       cdata->mn, cdata->sn,
 		       spdk_nvme_ns_get_id(ns));
 		return;
 	}
 
-	log_info("Attached to device %-20.20s (%-20.20s) controller: %p\n", cdata->mn, cdata->sn, ctrlr);
+	printf("Attached to device %-20.20s (%-20.20s) controller: %p\n", cdata->mn, cdata->sn, ctrlr);
 
 	num_ns = spdk_nvme_ctrlr_get_num_ns(ctrlr);
-	log_info("Found %i namespaces\n", num_ns);
+	printf("Found %i namespaces\n", num_ns);
 	for (nsid = 1; nsid <= num_ns; nsid++) {
 		struct spdk_nvme_ns *ns = spdk_nvme_ctrlr_get_ns(ctrlr, nsid);
-		log_info("NS: %i, size: %lx\n", nsid, spdk_nvme_ns_get_size(ns));
+		printf("NS: %i, size: %lx\n", nsid, spdk_nvme_ns_get_size(ns));
 	}
 }
 
@@ -317,7 +282,7 @@ int init_nvmedev(void)
 	struct pci_dev *dev;
 
 	if (CFG.num_nvmedev > 1)
-		log_info("IX suupports only one NVME device, ignoring all further devices\n");
+		printf("IX suupports only one NVME device, ignoring all further devices\n");
 	if (CFG.num_nvmedev == 0)
 		return 0;
 		
@@ -327,9 +292,8 @@ int init_nvmedev(void)
 
 	g_nvme_dev = dev;
 
-	if (spdk_nvme_probe(NULL, probe_cb, attach_cb, NULL) != 0) {
-	//if (spdk_nvme_probe(NULL, probe_cb, attach_cb) != 0) {
-		log_info("spdk_nvme_probe() failed\n");
+	if (spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL) != 0) {
+		printf("spdk_nvme_probe() failed\n");
 		return 1;
 	}
 	return 0;
@@ -341,8 +305,15 @@ int init_nvmeqp_cpu(void)
 		return 0;
 	
 	assert(nvme_ctrlr);
+
 	
-	percpu_get(qpair) = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr, 0);
+	struct spdk_nvme_io_qpair_opts opts;	
+	opts.qprio = 0;
+	opts.io_queue_size = 1024;
+	opts.io_queue_requests = 4096;
+
+	
+	percpu_get(qpair) = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr, &opts, sizeof(opts));
 	assert(percpu_get(qpair));
 	
 	return 0;
@@ -476,8 +447,8 @@ nvme_write_cb(void *ctx, const struct spdk_nvme_cpl *cpl)
 	struct nvme_ctx *n_ctx = (struct nvme_ctx *) ctx;
 
 	if (spdk_nvme_cpl_is_error(cpl)){
-		log_info("SPDK Write Failed!\n");
-		log_info("%s (%02x/%02x) sqid:%d cid:%d cdw0:%x sqhd:%04x p:%x m:%x dnr:%x\n",
+		printf("SPDK Write Failed!\n");
+		printf("%s (%02x/%02x) sqid:%d cid:%d cdw0:%x sqhd:%04x p:%x m:%x dnr:%x\n",
 		       get_status_string(cpl->status.sct, cpl->status.sc),
 		       cpl->status.sct, cpl->status.sc, cpl->sqid, cpl->cid, cpl->cdw0,
 		       cpl->sqhd, cpl->status.p, cpl->status.m, cpl->status.dnr);
@@ -494,8 +465,8 @@ nvme_read_cb(void *ctx, const struct spdk_nvme_cpl *cpl)
 	struct nvme_ctx *n_ctx = (struct nvme_ctx *) ctx;
 
 	if (spdk_nvme_cpl_is_error(cpl)){
-		log_info("SPDK Read Failed!\n");
-		log_info("%s (%02x/%02x) sqid:%d cid:%d cdw0:%x sqhd:%04x p:%x m:%x dnr:%x\n",
+		printf("SPDK Read Failed!\n");
+		printf("%s (%02x/%02x) sqid:%d cid:%d cdw0:%x sqhd:%04x p:%x m:%x dnr:%x\n",
 		       get_status_string(cpl->status.sct, cpl->status.sc),
 		       cpl->status.sct, cpl->status.sc, cpl->sqid, cpl->cid, cpl->cdw0,
 		       cpl->sqhd, cpl->status.p, cpl->status.m, cpl->status.dnr);
@@ -529,13 +500,13 @@ long bsys_nvme_open(long dev_id, long ns_id)
 	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, ns_id);
 	global_ns_size = spdk_nvme_ns_get_size(ns);
 	global_ns_sector_size = spdk_nvme_ns_get_sector_size(ns);
-	log_info("NVMe device namespace size: %lu bytes, sector size: %lu\n", spdk_nvme_ns_get_size(ns), spdk_nvme_ns_get_sector_size(ns));
+	printf("NVMe device namespace size: %lu bytes, sector size: %lu\n", spdk_nvme_ns_get_size(ns), spdk_nvme_ns_get_sector_size(ns));
 	return RET_OK;
 }
 
 long bsys_nvme_close(long dev_id, long ns_id, hqu_t handle)
 {
-	log_info("BSYS NVME CLOSE\n");
+	printf("BSYS NVME CLOSE\n");
 	// FIXME: for now, only support 1 namespace
 	if (ns_id != global_ns_id) {
 		usys_nvme_closed(-RET_INVAL, -RET_INVAL);
@@ -584,7 +555,7 @@ int set_nvme_flow_group_id(long flow_group_id, long* fg_handle_to_set)
 
 // adjust token deficit limit to allow LC tenants to burst, but not too much
 static void set_token_deficit_limit(void){
-	log_info("DEVICE PARAMS: read cost %d, write cost %d\n", NVME_READ_COST, NVME_WRITE_COST);
+	printf("DEVICE PARAMS: read cost %d, write cost %d\n", NVME_READ_COST, NVME_WRITE_COST);
 	TOKEN_DEFICIT_LIMIT = 100*NVME_WRITE_COST; 
 }
 
@@ -629,7 +600,7 @@ static unsigned long find_token_limit_from_devmodel(unsigned int lat_SLO){
 			return  (unsigned long) y;
 		}
 	}
-	log_info("WARNING: provide dev model info for latency SLO %d\n", lat_SLO);	
+	printf("WARNING: provide dev model info for latency SLO %d\n", lat_SLO);	
 	if (global_readonly_flag){
 		return dev_model[0].token_rdonly_rate_limit;
 	}
@@ -648,7 +619,7 @@ unsigned long lookup_device_token_rate(unsigned int lat_SLO){
 		case FLASH_DEV_MODEL:
 			return find_token_limit_from_devmodel(lat_SLO);
 		default:
-			log_info("WARNING: undefined flash device model\n");
+			printf("WARNING: undefined flash device model\n");
 			return UINT_MAX;
 
 	}
@@ -719,7 +690,7 @@ int recalculate_weights_add(long new_flow_group_idx){
 	
 		global_token_rate = new_global_token_rate;
 		global_LC_sum_token_rate = new_global_LC_sum_token_rate;
-		log_info("Global token rate: %lu tokens/s.\n", global_token_rate);
+		printf("Global token rate: %lu tokens/s.\n", global_token_rate);
 		global_num_lc_tenants++;
 	}
 	else{
@@ -776,7 +747,7 @@ int recalculate_weights_remove(long flow_group_idx){
 		global_LC_sum_token_rate -= nvme_fgs[flow_group_idx].scaled_IOPS_limit;
 		global_token_rate = lookup_device_token_rate(strictest_latency_SLO);
 		
-		log_info("Global token rate: %lu tokens/s\n", global_token_rate);
+		printf("Global token rate: %lu tokens/s\n", global_token_rate);
 
 		global_num_lc_tenants--;
 	}
@@ -846,7 +817,7 @@ long bsys_nvme_register_flow(long flow_group_id, unsigned long cookie,
 		 * Default way to procede here is to overwrite the whole tenant's SLO with the new one 
 		 *
 		 */
-		log_info("warning: tenant connection registered different SLO, will overwrite previous SLO for all of this tenant's connections. 1 SLO per tenant.\n");
+		printf("warning: tenant connection registered different SLO, will overwrite previous SLO for all of this tenant's connections. 1 SLO per tenant.\n");
 		nvme_fg->scaled_IOPuS_limit = nvme_fg->scaled_IOPS_limit / (double) 1E6; 
 	}
 	
@@ -861,7 +832,7 @@ long bsys_nvme_register_flow(long flow_group_id, unsigned long cookie,
 		nvme_fg->scaled_IOPuS_limit = nvme_fg->scaled_IOPS_limit / (double) 1E6; 
 		ret = recalculate_weights_add(fg_handle); 
 		if (ret < 0) {
-			log_info("warning: cannot satisfy SLO\n"); 
+			printf("warning: cannot satisfy SLO\n"); 
 			return -RET_CANTMEETSLO;
 		}
 
@@ -882,12 +853,11 @@ long bsys_nvme_register_flow(long flow_group_id, unsigned long cookie,
 		}
 		
 		if (latency_us_SLO == 0){
-			log_info("Register tenant %ld (port id: %ld). Managed by thread %ld. Best-effort tenant. \n", 
+			printf("Register tenant %ld (port id: %ld). Managed by thread %ld. Best-effort tenant. \n", 
 					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr));
-
 		}
 		else{
-			log_info("Register tenant %ld (port id: %ld). Managed by thread %ld. IOPS_SLO: %lu, r/w %d, scaled_IOPS: %lu tokens/s, latency SLO: %lu us. \n", 
+			printf("Register tenant %ld (port id: %ld). Managed by thread %ld. IOPS_SLO: %lu, r/w %d, scaled_IOPS: %lu tokens/s, latency SLO: %lu us. \n", 
 					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr),  IOPS_SLO, rw_ratio_SLO, nvme_fg->scaled_IOPS_limit, latency_us_SLO);
 		}
 	}
@@ -928,7 +898,7 @@ long bsys_nvme_unregister_flow(long fg_handle)
 static int nvme_compute_req_cost(int req_type, size_t req_len) 
 {
 	if (req_len <= 0){
-		log_info("ERROR: request size <= 0!\n");
+		printf("ERROR: request size <= 0!\n");
 		return 0;
 	}
 
@@ -959,7 +929,7 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
-		log_info("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_write\n");
+		printf("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_write\n");
 		return -RET_NOMEM;
 	}
 	ctx->cookie = cookie;
@@ -967,7 +937,7 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 	/*
 	paddr = (void *) vm_lookup_phys(vaddr, PGSIZE_2MB);
 	if (unlikely(!paddr)) {
-		log_info("bsys_nvme_write: no paddr for requested vaddr!");
+		printf("bsys_nvme_write: no paddr for requested vaddr!");
 		return -RET_FAULT;
 	}
  
@@ -998,7 +968,7 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 	else {
 		ret = spdk_nvme_ns_cmd_write(ns, percpu_get(qpair), paddr, lba, lba_count, nvme_write_cb, ctx, 0);
 		if(ret != 0)
-			log_info("NVME Write ret: %lx\n", ret);
+			printf("NVME Write ret: %lx\n", ret);
 		assert(ret == 0);
 	}
 
@@ -1018,7 +988,7 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
-		log_info("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_read\n");
+		printf("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_read\n");
 		return -RET_NOMEM;
 	}
 	ctx->cookie = cookie;
@@ -1026,7 +996,7 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	/*
 	paddr = (void *) vm_lookup_phys(vaddr, PGSIZE_2MB);
 	if (unlikely(!paddr)) {
-		log_info("bsys_nvme_read: no paddr for requested vaddr!");
+		printf("bsys_nvme_read: no paddr for requested vaddr!");
 		return -RET_FAULT;
 	}
 	paddr = (void *) ((uintptr_t) paddr + PGOFF_2MB(vaddr));
@@ -1058,7 +1028,7 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 		assert(((lba / lba_count) * lba_count) == lba);
 		ret = spdk_nvme_ns_cmd_read(ns, percpu_get(qpair), paddr, lba, lba_count, nvme_read_cb, ctx, 0);
 		if(ret != 0)
-			log_info("NVME Read ret: %lx\n", ret);
+			printf("NVME Read ret: %lx\n", ret);
 		assert(ret == 0);
 	}
 
@@ -1081,7 +1051,7 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 	if (ctx->user_buf.sgl_buf.current_sgl >= ctx->user_buf.sgl_buf.num_sgls) {
 		*address = 0;
 		*length = 0;
-		log_info("Warning: nvme req size mismatch\n"); 
+		printf("Warning: nvme req size mismatch\n"); 
 		assert(0);
 	}
 	else {
@@ -1090,7 +1060,7 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 		/*
 		paddr = (void *) vm_lookup_phys(temp, PGSIZE_2MB);
 		if (unlikely(!paddr)) {
-			log_info("bsys_nvme_read: no paddr for requested buf!");
+			printf("bsys_nvme_read: no paddr for requested buf!");
 			return -RET_FAULT;
 		}
 		*/
@@ -1098,7 +1068,7 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 		//*address = (uint64_t) ((uintptr_t) paddr + PGOFF_2MB(temp));
 		//*address = nvme_vtophys((void *)*address);
 		//temp = rte_malloc_virt2phy(temp); //FIXME: use this for rte_malloc req buf only
-		*address = nvme_vtophys((void *)temp);
+		*address = (void *)temp;
 		//*address = rte_mem_virt2phy((void *)temp);
 		//printf("translated %p address is %x, current sgl is %d, num_sgls is %d, handle %lu, tid %u\n", 
 		//	   temp, *address, ctx->user_buf.sgl_buf.current_sgl -1, ctx->user_buf.sgl_buf.num_sgls, ctx->handle, ctx->tid);	
@@ -1118,7 +1088,7 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
-		log_info("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_read\n");
+		printf("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_read\n");
 		return -RET_NOMEM;
 	}
 	ctx->cookie = cookie;
@@ -1147,7 +1117,7 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 		ret = spdk_nvme_ns_cmd_writev(ns, percpu_get(qpair), lba, lba_count,
 									  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		if(ret != 0)
-			log_info("Writev failed: %lx %lx %lx\n", ret, num_sgls, lba_count);
+			printf("Writev failed: %lx %lx %lx\n", ret, num_sgls, lba_count);
 		assert(ret == 0);
 	}
 
@@ -1165,7 +1135,7 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
-		log_info("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_read\n");
+		printf("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_read\n");
 		return -RET_NOMEM;
 	}
 	ctx->cookie = cookie;
@@ -1187,7 +1157,7 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 		ret = nvme_sw_queue_push_back(swq, ctx);
 		if (ret != 0) {
 			free_local_nvme_ctx(ctx);
-			log_info("returning NOMEM from readv\n");
+			printf("returning NOMEM from readv\n");
 			return -RET_NOMEM;
 		}
 	}
@@ -1195,7 +1165,7 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 		ret = spdk_nvme_ns_cmd_readv(ns, percpu_get(qpair), lba, lba_count,
 									 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		if(ret != 0)
-			log_info("Readv failed: %lx %lx %lx\n", ret, num_sgls, lba_count);
+			printf("Readv failed: %lx %lx %lx\n", ret, num_sgls, lba_count);
 		assert(ret == 0);
 	}
 	
@@ -1263,7 +1233,7 @@ static void issue_nvme_req(struct nvme_ctx* ctx)
 		panic("unrecognized nvme request\n");
 	}
 	if (ret < 0) {
-		log_info("Ran out of NVMe cmd buffer space\n");
+		printf("Error submitting nvme request\n");
 		panic("Ran out of NVMe cmd buffer space\n");
 	}
 }
@@ -1294,7 +1264,7 @@ static inline int nvme_sched_subround1(void)
 		// serve latency-critical (LC) tenants
 		if (nvme_fgs[nvme_swq->fg_handle].latency_critical_flag) {
 			if (nvme_swq->fg_handle == 2){
-				//log_info("%f\n", nvme_fgs[nvme_swq->fg_handle].scaled_IOPuS_limit);
+				//printf("%f\n", nvme_fgs[nvme_swq->fg_handle].scaled_IOPuS_limit);
 			}
 			
 			token_increment = (nvme_fgs[nvme_swq->fg_handle].scaled_IOPuS_limit * time_delta) + 0.5; // 0.5 is for rounding

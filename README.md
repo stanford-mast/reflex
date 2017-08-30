@@ -44,11 +44,10 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
    make -sj64 -C deps/dpdk
     # Add the full path to your DPDK build folder in deps/spdk/CONFIG. It should be added to the CONFIG_DPDK_DIR variable 
 	# Example: CONFIG_DPDK_DIR?=/home/user/ix_spdk/deps/dpdk/build
-   make -sj64 -C deps/spdk config.h
-   make -sj64 -C deps/spdk/lib/nvme/ CONFIG_NVME_IMPL="../../../../dp/drivers/nvme_impl.h -I ../../../dpdk/build/include/ -I deps/spdk/include/ -I ../../../../inc/ -D__KERNEL__"
-   make -sj64 -C deps/spdk/lib/util/ CONFIG_NVME_IMPL="../../../../dp/drivers/nvme_impl.h -I deps/spdk/include/ -I ../../../../inc/ -D__KERNEL__"
-   make -sj64 -C deps/spdk/lib/memory/ CONFIG_NVME_IMPL="../../../../dp/drivers/nvme_impl.h -I ../../../dpdk/build/include/ -I deps/spdk/include/ -I ../../../../inc/ -D__KERNEL__"
-	
+   cd deps/spdk
+   ./configure
+   make
+   cd ../.. 	
    ```
 
 4. Build ReFlex:

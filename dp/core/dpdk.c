@@ -76,6 +76,10 @@
 /* IX includes */
 #include <ix/log.h>
 #include <ix/dpdk.h>
+#include <ix/cfg.h>
+
+#include <spdk/env.h>
+#include <math.h>
 
 struct rte_mempool *dpdk_pool;
 
@@ -83,19 +87,21 @@ struct rte_mempool *dpdk_pool;
 
 int dpdk_init(void)
 {
-	int ret;
-	/* -m stands for memory in MBs that DPDK will allocate. Must be enough
-	 * to accommodate the pool_size defined below. */
-	char *argv[] = { "./ix", "--socket-mem", "8192" };
-	const int pool_buffer_size = 0;
+	struct spdk_env_opts opts;
+        
+	spdk_env_opts_init(&opts);
+        opts.name = "reflex";
+        opts.shm_id = -1;	
+
+	int core_num = pow(2, cores_active)-1;
+	char mask[3];
+	sprintf(mask, "%x", core_num);
+	opts.core_mask = mask;
+       
+        spdk_env_init(&opts);	
+
 	/* pool_size sets an implicit limit on cores * NICs that DPDK allows */
 	const int pool_size = 32768;
-
-	//optind = 0;
-	//internal_config.no_hugetlbfs = 0;
-	ret = rte_eal_init(sizeof(argv) / sizeof(argv[0]), argv);
-	if (ret < 0)
-		return ret;
 
 	dpdk_pool = rte_pktmbuf_pool_create("mempool", pool_size, MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
 	if (dpdk_pool == NULL)

@@ -95,6 +95,7 @@
 #define ENERGY_UNIT_MASK 0x1F00
 #define ENERGY_UNIT_OFFSET 0x08
 
+static int init_parse_cpu(void);
 static int init_cfg(void);
 static int init_firstcpu(void);
 static int init_hw(void);
@@ -126,9 +127,9 @@ struct init_vector_t {
 
 
 static struct init_vector_t init_tbl[] = {
-	{ "dpdk",    dpdk_init,    NULL, NULL},
 	{ "CPU",     cpu_init,     NULL, NULL},
-	//{ "Dune",    init_dune,    NULL, NULL},
+	{ "cfgcpu",     init_parse_cpu,     NULL, NULL},            // after cpu  
+	{ "dpdk",    dpdk_init,    NULL, NULL},
 	{ "timer",   timer_init,   timer_init_cpu, NULL},
 	{ "net",     net_init,     NULL, NULL},
 	{ "cfg",     init_cfg,     NULL, NULL},              // after net
@@ -569,6 +570,12 @@ static int init_hw(void)
 static int init_cfg(void)
 {
 	return cfg_init(init_argc, init_argv, &args_parsed);
+
+}
+
+static int init_parse_cpu(void)
+{
+	return cfg_parse_cpu(init_argc, init_argv, &args_parsed);
 
 }
 
