@@ -125,7 +125,6 @@ static struct config_vector_t config_tbl[] = {
 	{ "devices",      parse_devices},
 	{ "nvme_devices", parse_nvme_devices},
 	{ "nvme_device_model", parse_nvme_device_model},
-	{ "cpu",          parse_cpu},
 	{ "batch",        parse_batch},
 	{ "loader_path",  parse_loader_path},
 	{ "scheduler", 	  parse_scheduler_mode},
@@ -620,6 +619,7 @@ static int parse_cpu(void)
 		return -EINVAL;
 	}
 	if (!config_setting_get_elem(cpus, 0)) {
+		cores_active = 1;
 		cpu = config_setting_get_int(cpus);
 		return add_cpu(cpu);
 	}
@@ -630,6 +630,9 @@ static int parse_cpu(void)
 			return ret;
 		}
 	}
+
+	cores_active = config_setting_length(cpus);
+	
 	return 0;
 }
 
@@ -659,18 +662,7 @@ static int parse_loader_path(void)
 static int parse_conf_file(const char *path)
 {
 	int ret, i;
-
-	log_info("using config :'%s'\n", path);
-	config_init(&cfg);
-	if (!config_read_file(&cfg, path)) {
-		fprintf(stderr, "%s:%d - %s\n",
-			config_error_file(&cfg),
-			config_error_line(&cfg),
-			config_error_text(&cfg));
-		config_destroy(&cfg);
-		return -EINVAL;
-	}
-
+	
 	for (i = 0; config_tbl[i].name; ++i) {
 		if (config_tbl[i].f) {
 			ret = config_tbl[i].f();
@@ -684,6 +676,33 @@ static int parse_conf_file(const char *path)
 	}
 	return 0;
 }
+
+static int parse_conf_cpu(const char *path)
+{
+	int ret;
+
+	log_info("using config :'%s'\n", path);
+	config_init(&cfg);
+	if (!config_read_file(&cfg, path)) {
+		fprintf(stderr, "%s:%d - %s\n",
+			config_error_file(&cfg),
+			config_error_line(&cfg),
+			config_error_text(&cfg));
+		config_destroy(&cfg);
+		return -EINVAL;
+	}
+
+	ret = parse_cpu();
+	if (ret) {
+		log_err("error parsing cpu\n");
+		config_destroy(&cfg);	
+		return ret;
+	}
+	
+	return 0;
+}
+
+
 
 static void usage(char *argv[])
 {
@@ -752,9 +771,6 @@ int cfg_init(int argc, char *argv[], int *args_parsed)
 	int ret;
 	sprintf(config_file, DEFAULT_CONF_FILE);
 
-	ret = parse_arguments(argc, argv, args_parsed);
-	if (ret)
-		return ret;
 	ret = parse_conf_file(config_file);
 	if (ret)
 		return ret;
@@ -764,3 +780,17 @@ int cfg_init(int argc, char *argv[], int *args_parsed)
 	return 0;
 }
 
+int cfg_parse_cpu(int argc, char *argv[], int *args_parsed)
+{
+	int ret;
+	sprintf(config_file, DEFAULT_CONF_FILE);
+
+	ret = parse_arguments(argc, argv, args_parsed);
+	if (ret)
+		return ret;
+	ret = parse_conf_cpu(config_file);
+	if (ret)
+		return ret;
+	
+	return 0;
+}
