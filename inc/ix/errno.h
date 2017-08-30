@@ -229,11 +229,4 @@
 #define	ELAST		96		/* Must be equal largest errno */
 #endif /* _POSIX_SOURCE */
 
-#ifdef _KERNEL
-/* pseudo-errors returned inside kernel to modify return to process */
-#define	ERESTART	(-1)		/* restart syscall */
-#define	EJUSTRETURN	(-2)		/* don't modify regs, just return */
-#define	ENOIOCTL	(-3)		/* ioctl not handled by this layer */
-#define	EDIRIOCTL	(-4)		/* do direct ioctl in GEOM */
-#endif
 

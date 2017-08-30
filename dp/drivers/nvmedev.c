@@ -39,7 +39,6 @@
 #include <ix/nvmedev.h>
 #include <ix/mempool.h>
 #include <ix/nvme_sw_queue.h>
-#include "nvme_impl.h"
 #include <ix/atomic.h>
 
 #include <spdk/nvme.h>
@@ -101,20 +100,6 @@ static int nvme_compute_req_cost(int req_type, size_t req_len);
 
 static void set_token_deficit_limit(void);
 
-struct nvme_request * alloc_local_nvme_request(struct nvme_request **req)
-{
-	*req =  mempool_alloc(&percpu_get(request_mempool));
-	if(*req == NULL)
-		log_info("Ran out of nvme requests\n");
-	assert(*req);
-	return *req;
-}
-
-void free_local_nvme_request(struct nvme_request *req)
-{
-	mempool_free(&percpu_get(request_mempool),req);
-}
-
 struct nvme_ctx * alloc_local_nvme_ctx(void)
 {
 	return mempool_alloc(&percpu_get(ctx_mempool));
@@ -142,7 +127,7 @@ void free_local_nvme_swq(struct nvme_sw_queue *q)
 int init_nvme_request_cpu(void)
 {
 	struct nvme_tenant_mgmt* thread_tenant_manager;
-	struct mempool *m = &percpu_get(request_mempool);
+	//struct mempool *m = &percpu_get(request_mempool);
 	int ret;
 
 	if (percpu_get(mempool_initialized)) {
@@ -154,9 +139,11 @@ int init_nvme_request_cpu(void)
 		return 0;
 	}
 		
+	/*	
 	ret =  mempool_create(m, &request_datastore, MEMPOOL_SANITY_PERCPU, percpu_get(cpu_id));
 	if(ret)
 		return ret;
+	*/
 
 	struct mempool *m2 = &percpu_get(ctx_mempool);
 	ret = mempool_create(m2, &ctx_datastore, MEMPOOL_SANITY_PERCPU, percpu_get(cpu_id));
@@ -203,7 +190,7 @@ int init_nvme_request(void)
 	if (CFG.num_nvmedev == 0) {
 		return 0;
 	}
-	
+	/*
 	ret = mempool_create_datastore(m, NUM_NVME_REQUESTS, spdk_nvme_request_size(), "nvme_request");
 	if (ret) {
 		return ret;
@@ -217,7 +204,7 @@ int init_nvme_request(void)
 		mempool_destroy_datastore(m);
 		return ret;
 	}
-	
+	*/
 
 	ret = mempool_create_datastore(m2, NUM_NVME_REQUESTS, sizeof(struct nvme_ctx), "nvme_ctx");
 	if (ret) {
@@ -327,8 +314,7 @@ int init_nvmedev(void)
 
 	g_nvme_dev = dev;
 
-	if (spdk_nvme_probe(NULL, probe_cb, attach_cb, NULL) != 0) {
-	//if (spdk_nvme_probe(NULL, probe_cb, attach_cb) != 0) {
+	if (spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL) != 0) {
 		log_info("spdk_nvme_probe() failed\n");
 		return 1;
 	}
@@ -1098,7 +1084,7 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 		//*address = (uint64_t) ((uintptr_t) paddr + PGOFF_2MB(temp));
 		//*address = nvme_vtophys((void *)*address);
 		//temp = rte_malloc_virt2phy(temp); //FIXME: use this for rte_malloc req buf only
-		*address = nvme_vtophys((void *)temp);
+		*address = (void *)temp;
 		//*address = rte_mem_virt2phy((void *)temp);
 		//printf("translated %p address is %x, current sgl is %d, num_sgls is %d, handle %lu, tid %u\n", 
 		//	   temp, *address, ctx->user_buf.sgl_buf.current_sgl -1, ctx->user_buf.sgl_buf.num_sgls, ctx->handle, ctx->tid);	
