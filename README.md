@@ -61,13 +61,16 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
    ```
    cp ix.conf.sample ix.conf
     # modify at least host_addr, gateway_addr, devices, and nvme_devices
-   sudo sh -c 'for i in /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages; do echo 4096 > $i; done'
+  
    sudo modprobe -r ixgbe
    sudo modprobe -r nvme
    sudo modprobe uio
-   
    sudo insmod deps/dpdk/build/kmod/igb_uio.ko
    sudo deps/dpdk/usertools/dpdk-devbind.py --bind=igb_uio 0000:06:00.0   # insert device PCI address here!!! 
+	
+   sudo deps/spdk/scripts/setup.sh
+   
+   sudo sh -c 'for i in /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages; do echo 4096 > $i; done'
    ```
    
 6. Precondition the SSD and derive the request cost model:
