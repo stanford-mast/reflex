@@ -260,11 +260,6 @@ struct icmp_pkt {
 	(type) == ICMP_IREQ || (type) == ICMP_IREQREPLY || \
 	(type) == ICMP_MASKREQ || (type) == ICMP_MASKREPLY)
 
-#ifdef _KERNEL
-void	icmp_error(struct mbuf *, int, int, uint32_t, int);
-void	icmp_input(struct eth_fg *, struct mbuf *, int);
-int	ip_next_mtu(int, int);
-#endif
 
 struct eth_fg;
 int icmp_echo(struct eth_fg *, struct ip_addr *dest, uint16_t id, uint16_t seq, uint64_t timestamp);
