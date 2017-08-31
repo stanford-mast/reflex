@@ -33,7 +33,7 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
 2. Install library dependencies: 
 
    ```
-   sudo apt-get install libconfig-dev libnuma-dev libpciaccess-dev libaio-dev libevent-dev
+   sudo apt-get install libconfig-dev libnuma-dev libpciaccess-dev libaio-dev libevent-dev g++-multilib
    ```
 
 3. Build the dependecies:
@@ -42,10 +42,10 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
    sudo chmod +r /boot/System.map-`uname -r`
    make -sj64 -C deps/dpdk config T=x86_64-native-linuxapp-gcc
    make -sj64 -C deps/dpdk
-    # Add the full path to your DPDK build folder in deps/spdk/CONFIG. It should be added to the CONFIG_DPDK_DIR variable 
-	# Example: CONFIG_DPDK_DIR?=/home/user/ix_spdk/deps/dpdk/build
+   make -sj64 -C deps/dpdk install T=x86_64-native-linuxapp-gcc DESTDIR=deps/dpdk/x86_64-native-linuxapp-gcc
+   export REFLEX_HOME=`pwd`
    cd deps/spdk
-   ./configure
+   ./configure --with-dpdk=$REFLEX_HOME/deps/dpdk/x86_64-native-linuxapp-gcc
    make
    cd ../.. 	
    ```
@@ -60,13 +60,16 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
    ```
    cp ix.conf.sample ix.conf
     # modify at least host_addr, gateway_addr, devices, and nvme_devices
-   sudo sh -c 'for i in /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages; do echo 4096 > $i; done'
+  
    sudo modprobe -r ixgbe
    sudo modprobe -r nvme
    sudo modprobe uio
-   
    sudo insmod deps/dpdk/build/kmod/igb_uio.ko
    sudo deps/dpdk/usertools/dpdk-devbind.py --bind=igb_uio 0000:06:00.0   # insert device PCI address here!!! 
+
+   sudo deps/spdk/scripts/setup.sh
+   
+   sudo sh -c 'for i in /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages; do echo 4096 > $i; done'
    ```
    
 6. Precondition the SSD and derive the request cost model:
