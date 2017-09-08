@@ -68,6 +68,7 @@
 #include <ix/log.h>
 #include <ix/cfg.h>
 #include <ix/control_plane.h>
+#include <ix/ethdev.h>
 
 #include <asm/chksum.h>
 
@@ -287,7 +288,7 @@ int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct rte_mbuf
 	pkt->data_len = len; 
 	pkt->pkt_len = len; 
 	//printf("ip_send_one: len %u, pkt %p, dst_addr is %x\n", len, pkt, dst_addr->addr);
-	ret = rte_eth_tx_buffer(0, percpu_get(cpu_id), percpu_get(tx_buf), pkt); 
+	ret = rte_eth_tx_buffer(active_eth_port, percpu_get(cpu_id), percpu_get(tx_buf), pkt); 
 
 	if (unlikely(ret < 0)) {
 		printf("ip_send_one: tx ret is %d\n", ret);

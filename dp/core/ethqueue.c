@@ -128,7 +128,7 @@ int eth_process_poll(void)
 	do {
 		empty = true;
 		for (i = 0; i < percpu_get(eth_num_queues); i++) {
-			ret = rte_eth_rx_burst(0, i, &rx_pkts[i], 1); //burst 1 because check queues round-robin 
+			ret = rte_eth_rx_burst(active_eth_port, i, &rx_pkts[i], 1); //burst 1 because check queues round-robin 
 			if (ret) {
 				empty = false;
 				m = rx_pkts[i];
@@ -286,7 +286,7 @@ int ethdev_init_cpu(void)
 
 	tx_buffer = rte_zmalloc_socket("tx_buffer",
 			RTE_ETH_TX_BUFFER_SIZE(eth_rx_max_batch), 0,
-			rte_eth_dev_socket_id(0));
+			rte_eth_dev_socket_id(active_eth_port));
 	if (tx_buffer == NULL){
 		log_err("ERROR: cannot allocate buffer for tx \n");
 		exit(0);
@@ -313,7 +313,7 @@ void eth_process_send(void)
 
 
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-		rte_eth_tx_buffer_flush(0, i, percpu_get(tx_buf)); 
+		rte_eth_tx_buffer_flush(active_eth_port, i, percpu_get(tx_buf)); 
 	}
 }
 

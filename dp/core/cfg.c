@@ -186,7 +186,7 @@ int parse_fdir(void)
 		return 0;
 	}
 	
-	ret = rte_eth_dev_filter_supported(0, RTE_ETH_FILTER_FDIR);
+	ret = rte_eth_dev_filter_supported(active_eth_port, RTE_ETH_FILTER_FDIR);
 	if (ret < 0) {
 		log_err("ERROR: hardware does not support flow director.  \
 				Need to figure out alternative for steering traffic to specific \
@@ -240,7 +240,7 @@ int parse_fdir(void)
 		filter.action.behavior = RTE_ETH_FDIR_ACCEPT; 
 		filter.action.report_status = RTE_ETH_FDIR_REPORT_ID;
 		
-		ret = rte_eth_dev_filter_ctrl(0, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, &filter);
+		ret = rte_eth_dev_filter_ctrl(active_eth_port, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, &filter);
 		if (ret < 0) {
 			log_err("cfg: failed to add FDIR rule, ret %d.\n", ret);
 			return ret;
@@ -250,7 +250,7 @@ int parse_fdir(void)
 	}
 
 	struct rte_eth_fdir_stats stats;
-	ret = rte_eth_dev_filter_ctrl(0, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_STATS, &stats);
+	ret = rte_eth_dev_filter_ctrl(active_eth_port, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_STATS, &stats);
 	printf("FDIR stats: collision %d, free %d, add %d, f_add %d\n", stats.collision, stats.free, stats.add, stats.f_add);
 
 	config_destroy(&cfg); //moved this here
@@ -784,10 +784,11 @@ int cfg_parse_cpu(int argc, char *argv[], int *args_parsed)
 {
 	int ret;
 	sprintf(config_file, DEFAULT_CONF_FILE);
-
+	/*
 	ret = parse_arguments(argc, argv, args_parsed);
 	if (ret)
 		return ret;
+	*/
 	ret = parse_conf_cpu(config_file);
 	if (ret)
 		return ret;

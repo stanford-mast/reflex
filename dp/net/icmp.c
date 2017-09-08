@@ -67,6 +67,7 @@
 #include <ix/log.h>
 #include <ix/timer.h>
 #include <ix/cfg.h>
+#include <ix/ethdev.h>
 
 #include <asm/chksum.h>
 
@@ -97,7 +98,7 @@ static int icmp_reflect(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct icmp
 	pkt->pkt_len = rte_pktmbuf_pkt_len(pkt);
 	pkt->data_len = rte_pktmbuf_pkt_len(pkt);
 
-	ret = rte_eth_tx_buffer(0, 0, percpu_get(tx_buf), pkt); 
+	ret = rte_eth_tx_buffer(active_eth_port, 0, percpu_get(tx_buf), pkt); 
 
 	//if (unlikely(ret < 1)) {
 	if (unlikely(ret < 0)) {

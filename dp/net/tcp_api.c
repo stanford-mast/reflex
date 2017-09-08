@@ -704,7 +704,7 @@ static struct eth_fg *get_port_with_fdir(struct ip_tuple *id)
 	struct ix_rte_eth_dev *dev;
 	struct eth_rx_queue *queue;
 
-	ret = rte_eth_dev_filter_supported(0, RTE_ETH_FILTER_FDIR);
+	ret = rte_eth_dev_filter_supported(active_eth_port, RTE_ETH_FILTER_FDIR);
         if (ret < 0) {
 		printf("WARNING: flow director not supported on this device!\n");
 		return NULL;
@@ -720,7 +720,7 @@ static struct eth_fg *get_port_with_fdir(struct ip_tuple *id)
 	filter.action.behavior = RTE_ETH_FDIR_ACCEPT; 
 	filter.action.report_status = RTE_ETH_FDIR_REPORT_ID;
 
-	ret = rte_eth_dev_filter_ctrl(0, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, &filter);
+	ret = rte_eth_dev_filter_ctrl(active_eth_port, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, &filter);
 	if (ret < 0) {
 		log_err("cfg: failed to add FDIR rule, ret %d.\n", ret);
 		return ret;
@@ -762,14 +762,16 @@ struct eth_fg *get_local_port_and_set_queue(struct ip_tuple *id)
 	struct rte_eth_rss_conf rss_conf;
 
 	if (rte_eth_dev_count() > 1)
-		panic("tcp_connect not implemented for bonded interfaces\n");
+		printf("WARNING: only 1 ethernet port is used\n");
+		//panic("tcp_connect not implemented for bonded interfaces\n");
 
 	if (!percpu_get(local_port))
 		percpu_get(local_port) = RTE_PER_LCORE(cpu_id) * PORTS_PER_CPU;
 
 	percpu_get(local_port)++;
-	id->src_port = percpu_get(local_port);
 
+	id->src_port = percpu_get(local_port);
+	
 	fg = get_port_with_fdir(id);
 	if (fg){
 		return fg;

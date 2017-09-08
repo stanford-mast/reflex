@@ -189,13 +189,44 @@ There are several options for clients:
 2. Run an IX-based client that opens TCP connections to ReFlex and sends read/write requests to logical blocks.
 
 	* This client option avoids networking and storage (filesystem and block layer) overhead on the client machine. It requires the client machine to run IX.
-	
-   The ReFlex client implementation is currently only available in the kernel version of ReFlex. Clone ReFlex source code (master branch) on client machine and follow steps 1 to 6 in the setup instructions in master branch README. Comment out `nvme_devices` in ix.conf. Run IX-based ReFlex client:
+   	
+   Clone ReFlex source code (userspace branch) on client machine and follow steps 1 to 6 in the setup instructions in userspace branch README. Comment out `nvme_devices` in ix.conf. 
+   
+   There are currently two modes (open-loop and closed-loop testing) available on the IX-based client.
+   
+   To run the open-loop ReFlex client:  
 
    ```
-   sudo ./dp/ix -- ./apps/reflex_ix_client IP PORT SEQUENTIAL? NUM_THREADS REQ/s READ% SWEEP? REQ_SIZE PRECONDITION? 
-    # example: sudo ./dp/ix -- ./apps/reflex_ix_client 198.168.40.1 1234 0 1 200000 100 1 4096 0 
+   # example: sudo ./dp/ix -s 10.79.6.130 -p 1234 -w seq -T 1 -i 1000 -r 100 -S 1 -R 1024 -P 0 
    ```
+
+   To run the closed-loop ReFlex client: 
+   ```
+    # example: sudo ./dp/ix -s 10.79.6.130 -p 1234 -w seq -T 1 -i 1000 -r 100 -S 0 -R 1024 -P 0 -d 1 -t 5  
+   ```
+   
+   More descriptions for the command line options can be found by running
+   ```
+   sudo ./dp/ix -h
+   
+   Usage: 
+   sudo ./dp/ix
+   to run ReFlex server, no parameters required
+   to run ReFlex client, set the following options
+   -s  server IP address
+   -p  server port number
+   -w  workload type [seq/rand] (default=rand)
+   -T  number of threads (default=1)
+   -i  target IOPS for open-loop test (default=50000)
+   -r  percentage of read requests (default=100)
+   -S  sweep multiple target IOPS for open-loop test (default=1)
+   -R  request size in bytes (default=1024)
+   -P  precondition (default=0)
+   -d  queue depth for closed-loop test (default=0)
+   -t  execution time for closed-loop test (default=0)
+   ```
+
+
 
    Sample output:
 

@@ -62,6 +62,7 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <time.h>
 
 #include <ixev.h>
 #include <ix/mempool.h>
@@ -83,16 +84,17 @@
 
 #define MAX_SECTORS_PER_ACCESS 64
 #define MAX_LATENCY 5000 //2000
-#define MAX_IOPS 950000
-#define NUM_TESTS 16
+#define MAX_IOPS 900000
+#define NUM_TESTS 5 //16
 #define DURATION 1
 #define MAX_NUM_MEASURE MAX_IOPS * DURATION
-
-static const unsigned long sweep[NUM_TESTS] = {1000, 10000, 50000, 100000,
-					       150000, 200000, 250000, 300000,
-					       400000, 600000, 700000, 750000,
-					       800000, 850000, 900000, MAX_IOPS};
+static const unsigned long sweep[NUM_TESTS] = {1000, 1100, 1200, 1300, 1400};
 /*
+static const unsigned long sweep[NUM_TESTS] = {1000, 10000, 100000,
+					       150000, 200000, 250000, 300000,
+					       400000, 500000, 600000, 650000, 700000, 750000,
+					       800000, 850000,  MAX_IOPS};
+
 static const unsigned long sweep[NUM_TESTS] = {1000, 10000, 25000, 30000, //100000,
 					       35000, 40000, 50000, 60000,
 					       70000, 80000, 90000, 100000,
@@ -107,18 +109,24 @@ static long ns_size = 0x1749a956000;    // Samsung 1725
 
 
 static struct mempool_datastore nvme_usr_datastore;
-static const int outstanding_reqs = 4096 * 8;
+static const int outstanding_reqs = 512; // 4096 * 8;
 static volatile int started_conns = 0;
 static pthread_barrier_t barrier;
-static int req_size;
-static volatile int nr_threads;
+static int req_size = 1024;
+static volatile int nr_threads = 1;
 static unsigned long iops = 0;
-static int sequential;
+static int sequential = 0;
 struct ip_tuple *ip_tuple[64];
-static int read_percentage;
-static int SWEEP;
-static bool preconditioning;
-static unsigned long global_target_IOPS = 0;
+static int read_percentage = 100;
+static int SWEEP = 1;
+static bool preconditioning = 0;
+static unsigned long global_target_IOPS = 50000;
+static int qdepth = 0;
+static int run_time = 0;
+time_t start_time;
+time_t curr_time;
+static int port = -1;
+static char* ip = NULL;
 
 static __thread struct mempool req_pool;
 static __thread int conn_opened;
@@ -224,7 +232,8 @@ static void receive_req(struct pp_conn *conn)
 	ssize_t ret;
 	struct nvme_req *req;
 	BINARY_HEADER* header;
-
+	int measure_cond, report_cond, terminate_cond; 
+	
 	while(1) {
 		if(!conn->rx_pending) {
 			ret = ixev_recv(&conn->ctx, &conn->data[conn->rx_received],
@@ -243,6 +252,7 @@ static void receive_req(struct pp_conn *conn)
 			if(conn->rx_received < sizeof(BINARY_HEADER))
 				return;
 		}
+
 
 		//received the header
 		conn->rx_pending = true;
@@ -281,8 +291,14 @@ static void receive_req(struct pp_conn *conn)
 		}
 
 		req = header->req_handle;
-		if (req->cmd == CMD_GET) { //only report read latency (not write)
-			if (measure >= NUM_MEASURE && measure < NUM_MEASURE * 2) {
+
+		if (!SWEEP && qdepth) {
+			measure_cond = 1;
+		} else {
+			measure_cond = measure >= NUM_MEASURE && measure < NUM_MEASURE * 2;
+		}
+		//if (req->cmd == CMD_GET) { //only report read latency (not write)
+			if (measure_cond) {
 				unsigned long now = rdtsc();
 				if(((now - req->sent_time) / cycles_per_us) >= MAX_LATENCY)
 					measurements[MAX_LATENCY - 1]++;
@@ -295,23 +311,38 @@ static void receive_req(struct pp_conn *conn)
 			
 				num_measured_reads++;
 			}
-		}
+		//}
 		measure++;
 		req->sent_time = 0;
-		
+	
 		mempool_free(&nvme_req_buf_pool, req->buf);
 
 		mempool_free(&req_pool, req);
 		conn->rx_pending = false;
-		conn->rx_received = 0;
-		
-		if (measure == NUM_MEASURE * 2 && tid == 0 && num_measured_reads != 0) {
+		conn->rx_received = 0;	
+
+
+
+		if (!SWEEP && qdepth) {
+			time(&curr_time);
+			report_cond = difftime(curr_time, start_time) > run_time && tid == 0 && num_measured_reads != 0;
+			terminate_cond = difftime(curr_time, start_time) > run_time;
+		} else {
+			report_cond = measure == NUM_MEASURE * 2 && tid == 0 && num_measured_reads != 0;
+			terminate_cond = measure == NUM_MEASURE * 3;
+		}	
+
+
+
+		if (report_cond) {
 			unsigned long usecs = 1000UL * 1000UL;
 			unsigned long target_IOPS;
 
-			assert(measure <= MAX_NUM_MEASURE + NUM_MEASURE);
-			assert(num_measured_reads <= NUM_MEASURE);
-		      
+			if (!qdepth) {		
+				assert(measure <= MAX_NUM_MEASURE + NUM_MEASURE);
+				assert(num_measured_reads <= NUM_MEASURE);
+		        }
+			
 			if (SWEEP){
 				target_IOPS = sweep[run];
 			}
@@ -338,8 +369,9 @@ static void receive_req(struct pp_conn *conn)
 			run++;
 		}
 
-		if (measure == NUM_MEASURE * 3) {
-			assert(sent == NUM_MEASURE * 3);
+		if (terminate_cond) {
+			printf("debug: terminating\n");
+			if (!qdepth) assert(sent == NUM_MEASURE * 3);
 			terminate = true;
 			measure = 0;
 			num_measured_reads = 0;
@@ -351,6 +383,12 @@ static void receive_req(struct pp_conn *conn)
 				measurements[i] = 0;
 			}
 		}
+
+		if (qdepth) {
+			//close loop: send another request
+			send_handler(&conn->ctx, 1);
+		}
+
 	}
 }
 
@@ -439,30 +477,44 @@ int send_pending_client_reqs(struct pp_conn *conn)
 	return sent_reqs;
 }
 
-static void send_handler(void * arg)
+void send_handler(void * arg, int num_req)
 {
 	struct nvme_req *req;
 	struct ixev_ctx *ctx = (struct ixev_ctx *)arg;
 	struct pp_conn *conn = container_of(ctx, struct pp_conn, ctx);
 	unsigned long now;
 	int ssents = 0;
+
+	int send_cond, measure_cond; 
+	if (!SWEEP && qdepth) {
+		time(&curr_time);
+		if (difftime(curr_time, start_time) > run_time)
+                        return;
 	
-	if (sent == NUM_MEASURE * 3)
-		return;
-	
-	if (((now = rdtsc()) - last_send) < (cycles_between_req ))
-		return;
-	if (sent == NUM_MEASURE)
-		phase_start = now;
-	if (sent == 0)
-		bench_start = now;
-       
-	while (((now - bench_start) / cycles_between_req) >= sent && sent < (NUM_MEASURE * 3)) {
+		send_cond = num_req;
+		measure_cond = 1;
+	} else { 
+	        if (sent == NUM_MEASURE * 3)
+                        return;
+                if (((now = rdtsc()) - last_send) < (cycles_between_req ))
+                        return;
+                if (sent == NUM_MEASURE)
+                        phase_start = now;
+                if (sent == 0)
+                        bench_start = now;	
+
+		send_cond = ((now - bench_start) / cycles_between_req) >= sent && sent < (NUM_MEASURE * 3);
+		measure_cond = sent >= NUM_MEASURE && sent < NUM_MEASURE * 2;
+	}
+
+
+	while (send_cond) {
 		ssents++;
 		if(ssents > 32) {
 			//never send more than max batch size
 			break;
 		}
+
 		//setup next request
 		req = mempool_alloc(&req_pool);
 		if (!req) {
@@ -476,9 +528,9 @@ static void send_handler(void * arg)
 		req->conn = conn;
 
 		req->buf = mempool_alloc(&nvme_req_buf_pool);
-		
+
 		if ((rand() % 99) < read_percentage)
-			req->cmd = CMD_GET; 
+			req->cmd = CMD_GET;
 		else
 			req->cmd = CMD_SET;
 
@@ -504,16 +556,26 @@ static void send_handler(void * arg)
 			phase_start = rdtsc();
 			__sync_synchronize();
 		}
-		if (sent >= NUM_MEASURE && sent < NUM_MEASURE * 2) {
+		
+		if (measure_cond) {
 			//missed send?
 			if ((rdtsc() - last_send)  > (cycles_between_req * 105)/100) {
 				missed_sends++;
 			}
 		}
+
+
 		req->sent_time = rdtsc();
 		last_send = now;
 		sent++;
+
+		if (!SWEEP && qdepth) {
+			send_cond--;
+		} else { 
+			send_cond = ((now - bench_start) / cycles_between_req) >= sent && sent < (NUM_MEASURE * 3);
+		}
 	}
+
 	send_pending_client_reqs(conn);
 }
 
@@ -636,7 +698,6 @@ static void* receive_loop(void *arg)
 	ixev_dial(&conn->ctx, ip_tuple[tid]);
 	if (preconditioning)
 		SWEEP = 0;
-	
 	if (!SWEEP)
 		num_tests = 1;
 	else
@@ -659,13 +720,27 @@ static void* receive_loop(void *arg)
 		if (preconditioning) //write each lba once
 			NUM_MEASURE = (ns_size / ns_sector_size) / req_size;
 		pthread_barrier_wait(&barrier);
-		while (1) {
+	 
+		time(&start_time);
+		//---
+		if (!SWEEP && qdepth){
 			if (running)
-				send_handler(&conn->ctx);
-			ixev_wait();
-			if (terminate)
-				break;
+				send_handler(&conn->ctx, qdepth);
+			while(1){
+				ixev_wait(); 
+				if (terminate)
+					break;	
+			}
+		} else {
+			while (1) {
+				if (running)
+					send_handler(&conn->ctx, 0);
+				ixev_wait();
+				if (terminate)
+					break;
+			}
 		}
+		//---
 	}
 	running = true;
 	ixev_close(&conn->ctx);
@@ -685,11 +760,6 @@ int reflex_client_main(int argc, char *argv[])
 	int tid[64];
  	int i;
 	
-	if (argc != 10) {
-		fprintf(stderr, "Usage: %s IP PORT SEQUENTIAL? NUM_THREADS REQ/s READ_PERCENTAGE SWEEP REQ_SIZE PRECONDITION?\n",
-			argv[0]);
-		return -1;
-	}
 	sleep(10);
 
 	nr_cpu = cpus_active;
@@ -697,17 +767,95 @@ int reflex_client_main(int argc, char *argv[])
 		fprintf(stderr, "got invalid cpu count %d\n", nr_cpu);
 		exit(-1);
 	}
-	sequential = atoi(argv[3]);
-	nr_threads = atoi(argv[4]);
-	read_percentage = atoi(argv[6]);
-	SWEEP = atoi(argv[7]);
-	req_size_bytes = atoi(argv[8]);
-	if (req_size_bytes % ns_sector_size != 0){
-		printf("WARNING: request size should be multiple of sector size\n");
+
+        int opt;
+
+        while ((opt = getopt(argc, argv, "s:p:w:T:i:r:S:R:P:d:t:h")) != -1) {
+                switch (opt) {
+			case 's' :
+				ip = malloc(sizeof(char) * strlen(optarg));
+				strcpy(ip, optarg);
+				break;
+			case 'p' :
+				port = atoi(optarg);
+				break;
+                        case 'w' :
+				if (strcmp(optarg, "seq") == 0)
+					sequential = 1;
+				else if (strcmp(optarg, "rand") == 0)
+					sequential = 0;
+				else {
+					sequential = 0;
+					printf("WARNING: invalid workload type, use random by default\n");
+				}
+				break;
+                        case 'T' :
+                                nr_threads = atoi(optarg);
+                                break;
+                        case 'i' :
+                                global_target_IOPS = atoi(optarg);
+                                break;
+                        case 'r' :
+                                read_percentage = atoi(optarg);
+                                break;
+                        case 'S' :
+                                SWEEP = atoi(optarg);
+                                break;
+                        case 'R' :
+                                req_size_bytes = atoi(optarg);
+                                if (req_size_bytes % ns_sector_size != 0){
+                                        printf("WARNING: request size should be multiple of sector size\n");
+                                }
+				req_size = req_size_bytes / ns_sector_size;
+                                break;
+                        case 'P' :
+                                preconditioning = atoi(optarg);
+                                break;
+                        case 'd' :
+                                qdepth = atoi(optarg);
+                                break;
+                        case 't' :
+                                run_time = atoi(optarg);
+                                break;
+			case 'h' :
+				fprintf(stderr, "\nUsage: \n"
+					"sudo ./dp/ix\n"
+					"to run ReFlex server, no parameters required\n"
+					"to run ReFlex client, set the following options:\n"
+					"-s  server IP address\n"
+					"-p  server port number\n"
+					"-w  workload type [seq/rand] (default=rand)\n"
+					"-T  number of threads (default=1)\n"
+					"-i  target IOPS for open-loop test (default=50000)\n"
+					"-r  percentage of read requests (default=100)\n"
+					"-S  sweep multiple target IOPS for open-loop test (default=1)\n"
+					"-R  request size in bytes (default=1024)\n"
+					"-P  precondition (default=0)\n"
+					"-d  queue depth for closed-loop test (default=0)\n"
+					"-t  execution time in seconds for closed-loop test (default=0)\n"
+				);
+				exit(1);
+                        default:
+                                fprintf(stderr, "invalid command option\n");
+                                exit(1);
+                }
+        }
+
+	printf("DEBUG: ip=%s, port=%d, seq=%d, nr_threads=%d, global=%d, read=%d, SWEEP=%d, req_size_bytes=%d, preconditioning=%d, qdepth=%d, run_time=%d\n", ip, port, sequential, nr_threads, global_target_IOPS, read_percentage, SWEEP, req_size_bytes, preconditioning, qdepth, run_time);
+
+	if (ip == NULL) {
+		fprintf(stderr, "missing server IP address, enter -s [ip] to specify\n");
+		exit(1);
 	}
-	req_size = req_size_bytes / ns_sector_size;
-	preconditioning = atoi(argv[9]);
-	
+	if (port == -1) {
+		fprintf(stderr, "missing port number, enter -p [port] to specify\n");
+		exit(1);
+	}
+	if (SWEEP && qdepth) {
+		fprintf(stderr, "SWEEP and qdepth cannot both be nonzero\n");
+		exit(1);
+	}
+
 	assert(nr_threads <= nr_cpu);
 	pthread_barrier_init(&barrier, NULL, nr_threads);
 	
@@ -716,20 +864,21 @@ int reflex_client_main(int argc, char *argv[])
 		if (!ip_tuple[i])
 			exit(-1);
 
-		if (parse_ip_addr(argv[1], &ip_tuple[i]->dst_ip)) {
-			fprintf(stderr, "Bad IP address '%s'", argv[1]);
+		if (parse_ip_addr(ip, &ip_tuple[i]->dst_ip)) {
+			fprintf(stderr, "Bad IP address '%s'", ip);
 			exit(1);
 		}
 
 		timer_calibrate_tsc();
 		
-		ip_tuple[i]->dst_port = atoi(argv[2]) + i;
-		ip_tuple[i]->src_port = atoi(argv[2]);
-		printf("Connecting to port: %i\n", atoi(argv[2]) + i);
+		ip_tuple[i]->dst_port = port + i;
+		ip_tuple[i]->src_port = port;
+		printf("Connecting to port: %i\n", port + i);
 	}
-	global_target_IOPS = atoi(argv[5]);
-	cycles_between_req = ((unsigned long)cycles_per_us * 1000UL * 1000UL * nr_threads) / atoi(argv[5]);
-	NUM_MEASURE = atoi(argv[5]) * DURATION / nr_threads;
+
+	free(ip);
+	cycles_between_req = ((unsigned long)cycles_per_us * 1000UL * 1000UL * nr_threads) / global_target_IOPS;
+	NUM_MEASURE = global_target_IOPS * DURATION / nr_threads;
 	pp_conn_pool_entries = 16 * 4096;
 	pp_conn_pool_entries = ROUND_UP(pp_conn_pool_entries, MEMPOOL_DEFAULT_CHUNKSIZE);
 	ixev_init(&pp_conn_ops);
@@ -783,6 +932,7 @@ int reflex_client_main(int argc, char *argv[])
 
 	printf("Started %i threads\n", nr_cpu);
 	tid[0] = 0;
+
 	receive_loop(&tid[0]);
 	/*
 	for (int i = 1; i < nr_threads; i++) {

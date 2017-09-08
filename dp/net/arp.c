@@ -75,6 +75,7 @@
 #include <ix/log.h>
 #include <ix/lock.h>
 #include <ix/cfg.h>
+#include <ix/ethdev.h>
 
 #include <net/ethernet.h>
 #include <net/ip.h>
@@ -297,7 +298,7 @@ static int arp_send_pkt(uint16_t op,
 	pkt->pkt_len = ARP_PKT_SIZE;
 	pkt->data_len = ARP_PKT_SIZE;
 	// Note: always send arp replies from port 0, queue 0
-	ret = rte_eth_tx_buffer(0, 0, percpu_get(tx_buf), pkt); 
+	ret = rte_eth_tx_buffer(active_eth_port, 0, percpu_get(tx_buf), pkt); 
 
 	if (unlikely(ret < 0)) {
 		mbuf_free(pkt);
@@ -327,7 +328,7 @@ static int arp_send_response_reuse(struct rte_mbuf *pkt,
 	pkt->pkt_len = ARP_PKT_SIZE;
 	pkt->data_len = ARP_PKT_SIZE;
 	// Note: always send arp replies from port 0, queue 0
-	ret = rte_eth_tx_buffer(0, 0, percpu_get(tx_buf), pkt); 
+	ret = rte_eth_tx_buffer(active_eth_port, 0, percpu_get(tx_buf), pkt); 
 
 	if (ret < 0) {
 		log_info("warning: did not send arp reply, ret %d\n", ret);

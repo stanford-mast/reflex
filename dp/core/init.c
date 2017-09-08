@@ -210,11 +210,15 @@ static int init_ethdev(void)
 	struct rte_eth_dev_info dev_info;
 	struct rte_eth_txconf* txconf; 
 	struct rte_eth_rxconf* rxconf; 
+	struct ether_addr mac_addr;
 
 
 	nb_ports = rte_eth_dev_count();
 	if (nb_ports == 0)
 		rte_exit(EXIT_FAILURE, "No Ethernet ports - exiting\n");
+
+	if (nb_ports > 1)
+		printf("WARNING: only 1 ethernet port is used\n");
 
 	if (nb_ports > RTE_MAX_ETHPORTS)
 		nb_ports = RTE_MAX_ETHPORTS;
@@ -283,14 +287,14 @@ static int init_ethdev(void)
 				   (uint32_t) link.link_speed,
 				   (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
 				   ("full-duplex") : ("half-duplex\n"));
+			rte_eth_macaddr_get(port_id, &mac_addr);
+			active_eth_port = port_id;
 		}
 
 		rte_eth_promiscuous_enable(port_id);
 
 	}
 	
-	struct ether_addr mac_addr;
-	rte_eth_macaddr_get(0, &mac_addr);
 	struct eth_addr* macaddr = &mac_addr;
 	CFG.mac = *macaddr;
 
@@ -631,7 +635,11 @@ int main(int argc, char *argv[])
 		}
 
 	//ret = echoserver_main(argc - args_parsed, &argv[args_parsed]);
-	ret = reflex_server_main(argc - args_parsed, &argv[args_parsed]);
+	if (argc > 1)
+		ret = reflex_client_main(argc - args_parsed, &argv[args_parsed]);
+	else
+		ret = reflex_server_main(argc - args_parsed, &argv[args_parsed]);
+	
 	if (ret) {
 		//log_err("init: failed to start echoserver\n");
 		log_err("init: failed to start reflex server\n");
