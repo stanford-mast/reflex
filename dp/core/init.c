@@ -262,9 +262,10 @@ static int init_ethdev(void)
 			rte_eth_dev_set_mtu(port_id, 9000);	
 			rte_eth_dev_get_mtu(port_id, &mtu);
 			printf("Enable jumbo frames. MTU size is %d\n", mtu);
-			struct rte_eth_rxq_info rx_qinfo;
-                        rte_eth_rx_queue_info_get(port_id, 0, &rx_qinfo);
-                        rx_qinfo.scattered_rx = 1;
+			//FIXME: rx_qinfo crashes with ixgbe DPDK driver (but works fine on AWS)
+			//struct rte_eth_rxq_info rx_qinfo;
+            //rte_eth_rx_queue_info_get(port_id, 0, &rx_qinfo);
+			//rx_qinfo.scattered_rx = 1;
 			txconf->txq_flags = 0; 
 		}
 	
