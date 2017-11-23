@@ -379,7 +379,8 @@ static void receive_req(struct pp_conn *conn)
 			max = 0;
 			sent = 0;
 			missed_sends = 0;
-			for(int i = 0; i< MAX_LATENCY; i++){
+			int i;
+			for(i = 0; i< MAX_LATENCY; i++){
 				measurements[i] = 0;
 			}
 		}
@@ -672,8 +673,8 @@ static void* receive_loop(void *arg)
 		printf("MEMPOOL ALLOC FAILED !\n");
 		return NULL;
 	}
-	
-	for(int i = 0; i < MAX_LATENCY; i++){
+
+	for(i = 0; i < MAX_LATENCY; i++){
 		measurements[i] = 0;
 	}
 	
@@ -859,7 +860,7 @@ int reflex_client_main(int argc, char *argv[])
 	assert(nr_threads <= nr_cpu);
 	pthread_barrier_init(&barrier, NULL, nr_threads);
 	
-	for (int i = 0; i < nr_threads; i++) {
+	for (i = 0; i < nr_threads; i++) {
 		ip_tuple[i] = malloc(sizeof(struct ip_tuple[i]));
 		if (!ip_tuple[i])
 			exit(-1);

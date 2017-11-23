@@ -84,6 +84,7 @@
 struct rte_mempool *dpdk_pool;
 
 #define MEMPOOL_CACHE_SIZE 256
+#define DPDK_MBUF_LENGTH 9000 + RTE_PKTMBUF_HEADROOM
 
 int dpdk_init(void)
 {
@@ -103,7 +104,8 @@ int dpdk_init(void)
 	/* pool_size sets an implicit limit on cores * NICs that DPDK allows */
 	const int pool_size = 32768;
 
-	dpdk_pool = rte_pktmbuf_pool_create("mempool", pool_size, MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
+	//dpdk_pool = rte_pktmbuf_pool_create("mempool", pool_size, MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
+	dpdk_pool = rte_pktmbuf_pool_create("mempool", pool_size, MEMPOOL_CACHE_SIZE, 0, DPDK_MBUF_LENGTH, rte_socket_id());
 	if (dpdk_pool == NULL)
 		panic("Cannot create DPDK pool\n");
 

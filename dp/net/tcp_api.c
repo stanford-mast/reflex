@@ -986,7 +986,8 @@ int tcp_api_init_cpu(void)
 		return ret;
 	
 	// Initializing per core array of tcpapi_pcb pointers
-	for (unsigned int i = 0; i < MAX_PCBS; i++)
+	unsigned int i;
+	for (i = 0; i < MAX_PCBS; i++)
 		percpu_get(handle2pcb_array[i]) = NULL;
 
 	ret = mempool_create(&percpu_get(id_mempool), &id_datastore, MEMPOOL_SANITY_PERCPU, RTE_PER_LCORE(cpu_id));

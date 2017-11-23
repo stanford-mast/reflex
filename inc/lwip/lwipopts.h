@@ -97,7 +97,8 @@
  *        so conservatively set TCP_MSS to 1460 for now
  */
 //#define TCP_MSS 8960 /* Originally 1460, but now support jumbo frames */
-#define TCP_MSS 1460
+//#define TCP_MSS 1460
+#define TCP_MSS 6000 //TODO: increase this to 9000 after debug AWS issue
 
 //#define TCP_WND  (1024 * TCP_MSS) //Not sure what correct TCP_WND setting should be
 //#define TCP_WND  (2048 * 1460) //Not sure what correct TCP_WND setting should be
