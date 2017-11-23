@@ -104,6 +104,11 @@ static struct power_accumulator power_acc;
 
 unsigned int eth_rx_max_batch = 64;
 
+//#define PRINT_RTE_STATS 1
+
+#ifdef PRINT_RTE_STATS
+int count_stats = 0;
+#endif
 /**
  * eth_process_poll - polls HW for new packets
  *
@@ -134,6 +139,18 @@ int eth_process_poll(void)
 				m = rx_pkts[i];
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *)); 
 				eth_input_process(rx_pkts[i], ret);
+			
+#ifdef PRINT_RTE_STATS	
+				struct rte_eth_stats stats;	
+				rte_eth_stats_get(0, &stats);
+				count_stats++;
+				if (count_stats % 1000000) {
+					printf("Stats: NIC drop or error:  %f out of %f \n",
+							(double) stats.imissed + stats.ierrors + stats.oerrors, (double) (stats.imissed + stats.ipackets));
+					count_stats = 0;
+				}
+#endif
+
 			}
 			count += ret;
 		}
@@ -302,7 +319,6 @@ int ethdev_init_cpu(void)
 
 
 
-
 /**
  * eth_process_send - processes packets pending to be sent
  */
@@ -315,6 +331,8 @@ void eth_process_send(void)
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
 		rte_eth_tx_buffer_flush(active_eth_port, i, percpu_get(tx_buf)); 
 	}
+
+
 }
 
 /**

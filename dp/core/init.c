@@ -161,7 +161,7 @@ volatile int uaccess_fault;
 
 static struct rte_eth_conf default_eth_conf = {
 	.rxmode = {
-		.max_rx_pkt_len = 9000, /**< use this for jumbo frame */
+		.max_rx_pkt_len = 9128, /**< use this for jumbo frame */
 		.split_hdr_size = 0,
 		.header_split   = 0, /**< Header Split disabled */
 		.hw_ip_checksum = 1, /**< IP checksum offload disabled */
@@ -211,6 +211,7 @@ static int init_ethdev(void)
 	struct rte_eth_txconf* txconf; 
 	struct rte_eth_rxconf* rxconf; 
 	struct ether_addr mac_addr;
+	uint16_t mtu;
 
 
 	nb_ports = rte_eth_dev_count();
@@ -242,6 +243,11 @@ static int init_ethdev(void)
 	dev_conf->fdir_conf.flex_conf.nb_flexmasks = 0;
 
 	for (port_id = 0; port_id < nb_ports; port_id++) {		
+
+		if (dev_conf->rxmode.jumbo_frame) {
+			dev_conf->rxmode.max_rx_pkt_len = 9000 + ETHER_HDR_LEN + ETHER_CRC_LEN;
+		}
+
 		ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, dev_conf);
 		if (ret < 0) {
 			rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
@@ -251,8 +257,16 @@ static int init_ethdev(void)
 		rte_eth_dev_info_get(port_id, &dev_info);
 		txconf = &dev_info.default_txconf;  //FIXME: this should go here but causes TCP rx bug
 		rxconf = &dev_info.default_rxconf;
-		if (dev_conf->rxmode.jumbo_frame)
-				txconf->txq_flags = 0;
+				
+		if (dev_conf->rxmode.jumbo_frame) {
+			rte_eth_dev_set_mtu(port_id, 9000);	
+			rte_eth_dev_get_mtu(port_id, &mtu);
+			printf("Enable jumbo frames. MTU size is %d\n", mtu);
+			struct rte_eth_rxq_info rx_qinfo;
+                        rte_eth_rx_queue_info_get(port_id, 0, &rx_qinfo);
+                        rx_qinfo.scattered_rx = 1;
+			txconf->txq_flags = 0; 
+		}
 	
 		// initialize one queue per cpu
 		for (i = 0; i < CFG.num_cpus; i++) {
