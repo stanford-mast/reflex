@@ -79,6 +79,8 @@
 #include <lwip/pbuf.h>
 #include "net.h"
 
+#include <ix/monitor.h>
+
 
 /**
  * ip_addr_to_str - prints an IP address as a human-readable string
@@ -154,6 +156,8 @@ void eth_input_process(struct rte_mbuf *pkt, int nb_pkts){
 
 	struct eth_hdr *ethhdr = rte_pktmbuf_mtod(pkt, struct eth_hdr *);
 	struct eth_fg *fg;
+
+    util_per_sec->rxbytes += rte_pktmbuf_pkt_len(pkt); //monitor rxbytes
 
 	//set_current_queue(rx_queue);
 	//fg = fgs[pkt->fg_id];
@@ -294,6 +298,8 @@ int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct rte_mbuf
 		printf("ip_send_one: tx ret is %d\n", ret);
 		return -EIO;
 	}
+
+    util_per_sec->txbytes += rte_pktmbuf_pkt_len(pkt); //monitor txbytes
 
 	return 0;
 }

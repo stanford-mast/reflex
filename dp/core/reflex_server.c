@@ -65,6 +65,16 @@
 
 #include "reflex.h" 
 
+/****monitoring*********/
+#include <ix/monitor.h>
+#include <signal.h>
+#include <unistd.h>
+
+struct util *util_per_sec;
+struct list_head *util_list; 
+unsigned long start_time;
+/***********************/
+
 #define ROUND_UP(num, multiple) ((((num) + (multiple) - 1) / (multiple)) * (multiple))
 #define BATCH_DEPTH  512
 #define NAMESPACE 0
@@ -417,6 +427,8 @@ static void receive_req(struct pp_conn *conn)
 			conn->rx_received = 0;
 		}
 
+		util_per_sec->num_req++; //monitoring CPU 
+
 		req = conn->current_req;
 		header = (BINARY_HEADER *)&conn->data_recv[0];
 		
@@ -656,6 +668,36 @@ void *pp_main(void *arg)
 	return NULL;
 }
 
+
+
+void sig_handler(int signo)
+{
+    if (signo == SIGINT){
+        printf("Savings logs to log.txt...\n");
+
+        FILE *fp;
+        fp = fopen("log.txt", "w");
+        while(!list_empty(util_list)){
+            struct util *u = list_top(util_list, struct util, link);
+            /*
+            fprintf(fp, "num_req/sec=%lu\n", u->num_req);
+            fprintf(fp, "txbytes/sec=%lu\n", u->txbytes);
+            fprintf(fp, "rxbytes/sec=%lu\n", u->rxbytes);
+            */
+            fprintf(fp, "%lu,%lu,%lu\n", u->num_req,u->txbytes,u->rxbytes);
+            list_pop(util_list, struct util, link);
+            free(u);
+        }
+
+        fclose(fp);
+
+        free(util_per_sec);
+        exit(0);
+    }
+}
+
+
+
 int reflex_server_main(int argc, char *argv[])
 {
 	int i, nr_cpu;
@@ -712,6 +754,21 @@ int reflex_server_main(int argc, char *argv[])
 	}
 
 	printf("Started ReFlex server...\n");
+
+	/******start monitoring***/
+    util_per_sec = (struct util*) malloc(sizeof(struct util));
+    util_list = (struct list_head*) malloc(sizeof(struct list_head));
+
+    list_head_init(util_list);
+    util_per_sec->num_req = 0;
+    util_per_sec->rxbytes = 0;
+    util_per_sec->txbytes = 0;
+    start_time = rdtsc();
+
+    if (signal(SIGINT, sig_handler) == SIG_ERR)
+        printf("\ncan't catch SIGINT\n");
+	/************************/
+
 	pp_main(NULL);
 	return 0;
 }

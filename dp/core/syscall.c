@@ -78,6 +78,7 @@
 #include <ix/nvmedev.h>
 #include <ix/utimer.h>
 
+#include <ix/monitor.h>
 
 #define UARR_MIN_CAPACITY	8192
 
@@ -190,6 +191,7 @@ static int bsys_dispatch(struct bsys_desc __user *d, unsigned int nr)
  *
  * Returns 0 if successful, otherwise failure.
  */
+int util_list_len = 0;
 int sys_bpoll(struct bsys_desc *d, unsigned int nr)
 {
 	int ret, empty;
@@ -235,7 +237,32 @@ again:
 	if (nvme_sched_flag) {
 		nvme_sched();
 	}
-	
+
+
+	/******log monitoring stats***/
+    unsigned long now = rdtsc();
+    unsigned long time_elapsed = (now-start_time)/cycles_per_us;
+    if(time_elapsed >= 1000000) {
+        printf("1 sec passed\n");
+        printf("num_req/sec=%lu\n", util_per_sec->num_req);
+        printf("txbytes/sec=%lu\n", util_per_sec->txbytes);
+        printf("rxbytes/sec=%lu\n", util_per_sec->rxbytes);
+
+        list_add_tail(util_list, &util_per_sec->link);
+        util_list_len++;
+        printf("------\n");
+        printf("len=%d\n", util_list_len);
+        printf("------\n");
+        
+        util_per_sec = (struct util*) malloc(sizeof(struct util));
+        util_per_sec->num_req = 0;
+        util_per_sec->rxbytes = 0;
+        util_per_sec->txbytes = 0;
+        start_time = rdtsc();
+    }
+	/******log monitoring stats***/
+   
+
 
 	KSTATS_PUSH(percpu_bookkeeping, NULL);
 	cpu_do_bookkeeping();
