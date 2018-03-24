@@ -427,7 +427,6 @@ static void receive_req(struct pp_conn *conn)
 			conn->rx_received = 0;
 		}
 
-		util_per_sec->num_req++; //monitoring CPU 
 
 		req = conn->current_req;
 		header = (BINARY_HEADER *)&conn->data_recv[0];
@@ -488,6 +487,8 @@ static void receive_req(struct pp_conn *conn)
 		
 		switch (header->opcode) {
 		case CMD_SET:
+			util_per_sec->num_req++; //monitoring CPU 
+			
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_WR, &nvme_written_cb);
 			//ixev_nvme_write(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
 			ixev_nvme_writev(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
@@ -495,6 +496,8 @@ static void receive_req(struct pp_conn *conn)
 			conn->nvme_pending++;	
 			break;
 		case CMD_GET:
+			util_per_sec->num_req++; //monitoring CPU 
+			
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_RD, &nvme_response_cb);
 			//ixev_nvme_read(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
 			ixev_nvme_readv(conn->nvme_fg_handle, (void**)&req->buf[0], num4k,
@@ -684,7 +687,7 @@ void sig_handler(int signo)
             fprintf(fp, "txbytes/sec=%lu\n", u->txbytes);
             fprintf(fp, "rxbytes/sec=%lu\n", u->rxbytes);
             */
-            fprintf(fp, "%lu,%lu,%lu\n", u->num_req,u->txbytes,u->rxbytes);
+            fprintf(fp, "%lu\t%lu\t%lu\n", u->num_req,u->txbytes,u->rxbytes);
             list_pop(util_list, struct util, link);
             free(u);
         }
