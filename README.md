@@ -8,10 +8,12 @@ In the kernel implementation (available in the [master](https://github.com/stanf
 
 In the userspace implementation (available in the [userspace](https://github.com/stanford-mast/reflex/tree/userspace) branch), network and storage processing is implemented in userspace and ReFlex uses the standard `igb_uio` module to bind a network device to a DPDK-provided network device driver. The userspace version of ReFlex does not require the Dune kernel module to be loaded. This means the userspace version of ReFlex is simpler to deploy.  
 
+*Libaio branch:* This branch of ReFlex uses [liabio](https://github.com/littledan/linux-aio) instead of [SPDK](http://www.spdk.io) to access storage. This version of ReFlex allows us to run ReFlex with regular block devices and use kernel block device drivers instead of the userspace SPDK NVMe device driver. This is useful for running ReFlex on non-NVMe devices such as SATA or SAS SSDs and HDDs. If your goal is to maximize remote storage performance, you should use the kernel or userspace versions of ReFlex with NVMe Flash, not this libaio branch. The libaio version simply provides the flexibility to run ReFlex with non-NVMe hardware.
 
-## Requirements for userspace version of ReFlex
 
-ReFlex requires a NVMe Flash device and a [network interface card supported by Intel DPDK](http://dpdk.org/doc/nics). We have tested ReFlex with the Intel 82599 10GbE NIC and the following NVMe SSDs: Samsung PM1725 and Intel P3600. We have also tested ReFlex on Amazon Web Services EC2 instances i3.4xlarge (see end of setup instructions below for AWS EC2 instance setup).
+## Requirements for libaio userspace version of ReFlex
+
+ReFlex-liabio requires a block storage device and a [network interface card supported by Intel DPDK](http://dpdk.org/doc/nics). We have tested ReFlex with the Intel 82599 10GbE NIC and Amazon Elastic Network Adapter (we have tested ReFlex on Amazon Web Services EC2 instances i3.4xlarge -- see end of setup instructions below for AWS EC2 instance setup).
 
 ReFlex has been successfully tested on Ubuntu 16.04 LTS with kernel 4.4.0.
 
@@ -62,7 +64,6 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
     # modify at least host_addr, gateway_addr, devices, and nvme_devices
   
    sudo modprobe -r ixgbe
-   sudo modprobe -r nvme
    sudo modprobe uio
    sudo insmod deps/dpdk/build/kmod/igb_uio.ko
    sudo deps/dpdk/usertools/dpdk-devbind.py --bind=igb_uio 0000:06:00.0   # insert device PCI address here!!! 
