@@ -165,7 +165,6 @@ int send_req(struct nvme_req *req)
 		header = (BINARY_HEADER *)&conn->data_send[0];
 		header->magic = sizeof(BINARY_HEADER); //RESP_PKT;
 		header->opcode = req->opcode;
-		header->lba = req->lba;
 		
 		if (req->opcode == CMD_SET)
 			header->lba_count = 0;
