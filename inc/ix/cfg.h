@@ -97,7 +97,7 @@ struct cfg_parameters {
 	struct pci_addr ethdev[CFG_MAX_ETHDEV];
 
 	int num_nvmedev;
-	struct pci_addr nvmedev[CFG_MAX_NVMEDEV];
+	char* nvmedev[CFG_MAX_NVMEDEV];
 
 	int num_ports;
 	uint16_t ports[CFG_MAX_PORTS];

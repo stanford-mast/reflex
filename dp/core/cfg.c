@@ -253,7 +253,7 @@ int parse_fdir(void)
 	ret = rte_eth_dev_filter_ctrl(active_eth_port, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_STATS, &stats);
 	printf("FDIR stats: collision %d, free %d, add %d, f_add %d\n", stats.collision, stats.free, stats.add, stats.f_add);
 
-	config_destroy(&cfg); //moved this here
+	//config_destroy(&cfg); //moved this here
 	return 0;
 }
 
@@ -360,11 +360,6 @@ static int add_dev(const char *dev)
 	int ret, i;
 	struct pci_addr addr;
 
-	ret = pci_str_to_addr(dev, &addr);
-	if (ret) {
-		log_err("cfg: invalid device name %s\n", dev);
-		return ret;
-	}
 	for (i = 0; i < CFG.num_ethdev; ++i) {
 		if (!memcmp(&CFG.ethdev[i], &addr, sizeof(struct pci_addr)))
 			return 0;
@@ -402,20 +397,13 @@ static int add_nvme_dev(const char *dev)
 	int ret, i;
 	struct pci_addr addr;
 
-	ret = pci_str_to_addr(dev, &addr);
-	if (ret) {
-		log_err("cfg: invalid device name %s\n", dev);
-		return ret;
-	}
-	for (i = 0; i < CFG.num_nvmedev; ++i) {
-		if (!memcmp(&CFG.nvmedev[i], &addr, sizeof(struct pci_addr)))
-			return 0;
-	}
 	if (CFG.num_nvmedev >= CFG_MAX_NVMEDEV)
 		return -E2BIG;
 	log_info("------------1CFG.num_ethdev %d\n", CFG.num_ethdev);
-	CFG.nvmedev[CFG.num_nvmedev++] = addr;
-	log_info("------------2CFG.num_ethdev %d\n", CFG.num_ethdev);
+	CFG.nvmedev[CFG.num_nvmedev++] = dev; //addr;
+	printf("Storage device is %s\n", CFG.nvmedev);
+
+	CFG.num_nvmedev = 1;
 	return 0;
 }
 

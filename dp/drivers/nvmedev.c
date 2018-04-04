@@ -29,6 +29,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#define _GNU_SOURCE
+
 #include <sys/socket.h>
 #include <rte_per_lcore.h>
 
@@ -42,13 +44,22 @@
 #include <ix/atomic.h>
 
 #include <spdk/nvme.h>
+#include <spdk/fd.h>
+#include <fcntl.h>
+#include <sys/types.h>
 #include <limits.h>
+
+//#include <libaio.h>
 
 static struct spdk_nvme_ctrlr *nvme_ctrlr = NULL;
 static long global_ns_id = 1;
-static long global_ns_size = 1;
+static long global_ns_size = 512*1048576; //FIXME: default device size in bytes; 
+										  // for NVMe devices, ns size is read from device
+										  // for non-NVMe device, stays at this default so set it to capacity of device
 static long global_ns_sector_size = 1;
 struct pci_dev *g_nvme_dev;
+
+static int fd;
 
 #define MAX_OPEN_BATCH 32 
 #define NUM_NVME_REQUESTS (4096 * 256)//4096 * 64 //1024
@@ -82,6 +93,8 @@ static long TOKEN_DEFICIT_LIMIT = 10000;
 static bool global_readonly_flag = true;
 
 #define SLO_REQ_SIZE 4096
+
+#define MAX_EVENTS 100
 
 RTE_DEFINE_PER_LCORE(struct mempool, request_mempool __attribute__ ((aligned (64))));
 RTE_DEFINE_PER_LCORE(struct mempool, ctx_mempool __attribute__ ((aligned (64))));
@@ -166,7 +179,15 @@ int init_nvme_request_cpu(void)
 	percpu_get(local_leftover_tokens) = 0;
 	percpu_get(local_extra_demand) = 0;
 	percpu_get(mempool_initialized) = true;
-	
+
+	//LIBAIO
+	io_setup(MAX_EVENTS, &thread_tenant_manager->aio_ctx);
+	thread_tenant_manager->events = calloc(MAX_EVENTS, sizeof(struct io_event));
+	if (!thread_tenant_manager->events){
+		printf("ERROR: could not allocate events array for libaio\n");
+		return -1;
+	}
+
 	return ret;
 }
 
@@ -278,24 +299,19 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
  */
 int init_nvmedev(void)
 {
-	const struct pci_addr *addr = &CFG.nvmedev[0];
-	struct pci_dev *dev;
 
 	if (CFG.num_nvmedev > 1)
 		printf("IX suupports only one NVME device, ignoring all further devices\n");
 	if (CFG.num_nvmedev == 0)
 		return 0;
-		
-	dev = pci_alloc_dev(addr);
-	if (!dev)
-		return -ENOMEM;
-
-	g_nvme_dev = dev;
-
-	if (spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL) != 0) {
-		printf("spdk_nvme_probe() failed\n");
-		return 1;
+	
+	printf("device path is: %s\n", CFG.nvmedev[0]);
+	fd = open(CFG.nvmedev[0], O_RDWR | O_DIRECT);
+	if (fd < 0){
+		printf("ERROR: could not open device: %s\n", strerror(errno));
+		return -1;
 	}
+
 	return 0;
 }
 
@@ -303,20 +319,8 @@ int init_nvmeqp_cpu(void)
 {
 	if (CFG.num_nvmedev == 0)
 		return 0;
-	
-	assert(nvme_ctrlr);
 
-	
-	struct spdk_nvme_io_qpair_opts opts;	
-	opts.qprio = 0;
-	opts.io_queue_size = 1024;
-	opts.io_queue_requests = 4096;
-
-	
-	percpu_get(qpair) = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr, &opts, sizeof(opts));
-	assert(percpu_get(qpair));
-	
-	return 0;
+	return 0; // for libaio don't need this function, so do nothing!!	
 }
 
 void nvmedev_exit(void)
@@ -464,6 +468,7 @@ nvme_read_cb(void *ctx, const struct spdk_nvme_cpl *cpl)
 {
 	struct nvme_ctx *n_ctx = (struct nvme_ctx *) ctx;
 
+	printf("nvme_read_cb!\n");
 	if (spdk_nvme_cpl_is_error(cpl)){
 		printf("SPDK Read Failed!\n");
 		printf("%s (%02x/%02x) sqid:%d cid:%d cdw0:%x sqhd:%04x p:%x m:%x dnr:%x\n",
@@ -497,10 +502,11 @@ long bsys_nvme_open(long dev_id, long ns_id)
 	bitmap_init(nvme_fgs_bitmap, MAX_NVME_FLOW_GROUPS, 0);
 
 	percpu_get(open_ev[percpu_get(open_ev_ptr)++]) = ioq;
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, ns_id);
-	global_ns_size = spdk_nvme_ns_get_size(ns);
-	global_ns_sector_size = spdk_nvme_ns_get_sector_size(ns);
-	printf("NVMe device namespace size: %lu bytes, sector size: %lu\n", spdk_nvme_ns_get_size(ns), spdk_nvme_ns_get_sector_size(ns));
+	if (spdk_fd_get_size(fd) > 0){ //NOTE this only works for nvme devices...
+		global_ns_size = spdk_fd_get_size(fd);
+	}
+	global_ns_sector_size = spdk_fd_get_blocklen(fd);
+	printf("global_ns size is %lu, sector size is %lu\n", global_ns_size, global_ns_sector_size);
 	return RET_OK;
 }
 
@@ -918,6 +924,23 @@ static int nvme_compute_req_cost(int req_type, size_t req_len)
 	return 1;
 }
 
+void set_iocb(struct iocb* iocb, int cmd, void* paddr, unsigned long lba, 
+			  unsigned int lba_count, unsigned long ctx_addr) {
+
+	if (cmd == NVME_CMD_READ)
+		iocb->aio_lio_opcode = IO_CMD_PREAD;
+	else if (cmd == NVME_CMD_WRITE)
+		iocb->aio_lio_opcode = IO_CMD_PWRITE;
+	else 
+		printf("ERROR: unknown cmd\n");
+
+	iocb->aio_fildes = fd;
+	iocb->u.c.buf = paddr;
+	iocb->u.c.nbytes = lba_count * global_ns_sector_size;
+	iocb->u.c.offset = lba * global_ns_sector_size; //FIXME: check this
+	iocb->data = ctx_addr;
+}
+
 long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned long lba,
 		     unsigned int lba_count, unsigned long cookie)
 {
@@ -925,8 +948,10 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 	struct nvme_ctx *ctx;
 	void* paddr;
 	int ret;
+	struct nvme_tenant_mgmt* manager;
+	struct iocb* iocb = &ctx->iocb;
+	manager = &percpu_get(nvme_tenant_manager);
 
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
 		printf("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_write\n");
@@ -934,15 +959,6 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 	}
 	ctx->cookie = cookie;
 	
-	/*
-	paddr = (void *) vm_lookup_phys(vaddr, PGSIZE_2MB);
-	if (unlikely(!paddr)) {
-		printf("bsys_nvme_write: no paddr for requested vaddr!");
-		return -RET_FAULT;
-	}
- 
-	paddr = (void *) ((uintptr_t) paddr + PGOFF_2MB(vaddr));
-	*/
 	paddr = vaddr;	
 
 	if (nvme_sched_flag){
@@ -951,10 +967,11 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_WRITE;
 		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_WRITE, lba_count * global_ns_sector_size);
-		ctx->ns = ns;
 		ctx->paddr = paddr;
 		ctx->lba = lba;
 		ctx->lba_count = lba_count;
+
+		set_iocb(&ctx->iocb, NVME_CMD_WRITE, paddr, lba, lba_count, ctx);
 
 		// add to SW queue
 		//struct nvme_sw_queue swq = percpu_get(nvme_swq[ctx->priority]);
@@ -966,7 +983,9 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 		}
 	}
 	else {
-		ret = spdk_nvme_ns_cmd_write(ns, percpu_get(qpair), paddr, lba, lba_count, nvme_write_cb, ctx, 0);
+		set_iocb(&ctx->iocb, NVME_CMD_WRITE, paddr, lba, lba_count, ctx);
+		//ret = spdk_nvme_ns_cmd_write(ns, percpu_get(qpair), paddr, lba, lba_count, nvme_write_cb, ctx, 0);
+		ret = io_submit(manager->aio_ctx, 1, &iocb);
 		if(ret != 0)
 			printf("NVME Write ret: %lx\n", ret);
 		assert(ret == 0);
@@ -974,6 +993,8 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 
 	return RET_OK;
 }
+
+
 
 long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned long lba,
 		    unsigned int lba_count, unsigned long cookie)
@@ -983,8 +1004,9 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	void* paddr;
 	unsigned int ns_sector_size;
 	int ret;
-	
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
+	struct nvme_tenant_mgmt* manager;
+	struct iocb* iocb = &ctx->iocb;
+	manager = &percpu_get(nvme_tenant_manager);
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
@@ -993,14 +1015,6 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	}
 	ctx->cookie = cookie;
 	
-	/*
-	paddr = (void *) vm_lookup_phys(vaddr, PGSIZE_2MB);
-	if (unlikely(!paddr)) {
-		printf("bsys_nvme_read: no paddr for requested vaddr!");
-		return -RET_FAULT;
-	}
-	paddr = (void *) ((uintptr_t) paddr + PGOFF_2MB(vaddr));
-	*/
 	paddr = vaddr;
 		
 	ctx->user_buf.buf = vaddr;
@@ -1011,10 +1025,11 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_READ;
 		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_READ, lba_count * global_ns_sector_size);
-		ctx->ns = ns;
 		ctx->paddr = paddr;
 		ctx->lba = lba;
 		ctx->lba_count = lba_count;
+
+		set_iocb(&ctx->iocb, NVME_CMD_READ, paddr, lba, lba_count, ctx);
 
 		// add to SW queue
 		struct nvme_sw_queue* swq = nvme_fgs[fg_handle].nvme_swq;
@@ -1025,8 +1040,10 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 		}
 	}
 	else {
+		set_iocb(&ctx->iocb, NVME_CMD_READ, paddr, lba, lba_count, ctx);
 		assert(((lba / lba_count) * lba_count) == lba);
-		ret = spdk_nvme_ns_cmd_read(ns, percpu_get(qpair), paddr, lba, lba_count, nvme_read_cb, ctx, 0);
+		ret = io_submit(manager->aio_ctx, 1, &iocb);
+		//ret = spdk_nvme_ns_cmd_read(ns, percpu_get(qpair), paddr, lba, lba_count, nvme_read_cb, ctx, 0);
 		if(ret != 0)
 			printf("NVME Read ret: %lx\n", ret);
 		assert(ret == 0);
@@ -1076,15 +1093,13 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 	}
 	return 0;
 }
-
+//TODO: use writev in reflex_server --> IO_CMD_PWRITEV aio command
 long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgls,
 		     unsigned long lba, unsigned int lba_count, unsigned long cookie)
 {
 	struct spdk_nvme_ns *ns;
 	struct nvme_ctx *ctx;
 	int ret;
-	
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
@@ -1101,7 +1116,6 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_WRITE;
 		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_WRITE, lba_count * global_ns_sector_size);
-		ctx->ns = ns;
 		ctx->lba = lba;
 		ctx->lba_count = lba_count;
 
@@ -1124,14 +1138,13 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 	return RET_OK;
 }
 
+//TODO: use readv in reflex_server --> IO_CMD_PREADV aio command
 long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls,
 		     unsigned long lba, unsigned int lba_count, unsigned long cookie)
 {
 	struct spdk_nvme_ns *ns;
 	struct nvme_ctx *ctx;
 	int ret;
-	
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
@@ -1148,7 +1161,6 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_READ;
 		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_READ, lba_count * global_ns_sector_size);
-		ctx->ns = ns;
 		ctx->lba = lba;
 		ctx->lba_count = lba_count;
 
@@ -1197,6 +1209,9 @@ unsigned long try_acquire_global_tokens(unsigned long token_demand) {
 static void issue_nvme_req(struct nvme_ctx* ctx)
 {
 	int ret;
+	struct nvme_tenant_mgmt* manager;
+	struct iocb* iocb = &ctx->iocb;
+	manager = &percpu_get(nvme_tenant_manager);
 
 	//don't schedule request on flash if FAKE_FLASH test	
 	if (nvme_dev_model == FAKE_FLASH) {
@@ -1213,27 +1228,11 @@ static void issue_nvme_req(struct nvme_ctx* ctx)
 		return; 
 	}
 
-	if (ctx->cmd == NVME_CMD_READ) {
-		// if PRP:
-		//ret = spdk_nvme_ns_cmd_read(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_read_cb, ctx, 0);
-		// for SGL:
-		ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
-									 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
-		
-	}
-	else if (ctx->cmd == NVME_CMD_WRITE) {
-		// if PRP:
-		//ret = spdk_nvme_ns_cmd_write(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_write_cb, ctx, 0);
-		// for SGL:
-		ret = spdk_nvme_ns_cmd_writev(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
-									  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
-		
-	}
-	else {
-		panic("unrecognized nvme request\n");
-	}
+
+	ret = io_submit(manager->aio_ctx, 1, &iocb);
+	
 	if (ret < 0) {
-		printf("Error submitting nvme request\n");
+		printf("Error submitting nvme request: %s\n", strerror(errno));
 		panic("Ran out of NVMe cmd buffer space\n");
 	}
 }
@@ -1493,10 +1492,37 @@ int nvme_sched(void)
 	return 0;
 }
 
+
+void
+aio_write_cb(void *ctx)
+{
+	struct nvme_ctx *n_ctx = (struct nvme_ctx *) ctx;
+
+	usys_nvme_written(n_ctx->cookie, RET_OK);
+	
+	free_local_nvme_ctx(n_ctx);
+}
+
+void
+aio_read_cb(void *ctx)
+{
+	struct nvme_ctx *n_ctx = (struct nvme_ctx *) ctx;
+
+	usys_nvme_response(n_ctx->cookie, n_ctx->iocb.u.c.buf, RET_OK);
+	
+	free_local_nvme_ctx(n_ctx);
+}
+
+
 void nvme_process_completions()
 {
 	int i;
 	int max_completions = 4096;
+	struct nvme_tenant_mgmt* manager;
+	manager = &percpu_get(nvme_tenant_manager);
+	struct io_event* events = manager->events;
+	void* cookie;
+	int count = 0;
 
 	if (CFG.num_nvmedev == 0)
 		return;
@@ -1506,7 +1532,19 @@ void nvme_process_completions()
 		percpu_get(received_nvme_completions)++;
 	}
 	percpu_get(open_ev_ptr) = 0;
-	percpu_get(received_nvme_completions) +=
-		spdk_nvme_qpair_process_completions(percpu_get(qpair),
-						    max_completions);
+	count = io_getevents(manager->aio_ctx, 0, max_completions, manager->events, NULL);
+
+	for(i =0; i < count; i++) {
+		percpu_get(received_nvme_completions)++;
+		cookie = events[i].data;
+		if (events[i].obj->aio_lio_opcode == IO_CMD_PREAD){
+			aio_read_cb(cookie);
+		}
+		else if (events[i].obj->aio_lio_opcode == IO_CMD_PWRITE){
+			aio_write_cb(cookie);
+		}
+		else 
+			panic("unknown completion!\n");
+	}
+
 }

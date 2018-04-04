@@ -36,7 +36,7 @@ PCIDMA	= ../deps/pcidma
 INC	+= -I$(PCIDMA)
 LD	= gcc
 LDFLAGS	= -T ix.ld
-LDLIBS	= -lrt -lpthread -lm -lnuma -ldl -lconfig -lpciaccess
+LDLIBS	= -lrt -lpthread -lm -lnuma -ldl -lconfig -lpciaccess -laio
 
 ifneq ($(DEBUG),)
 CFLAGS += -DDEBUG

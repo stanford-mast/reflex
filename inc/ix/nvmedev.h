@@ -41,6 +41,8 @@
 #include <ix/syscall.h>
 #include <ix/list.h>
 
+#include <libaio.h>
+
 /* FIXME: this should be read from NVMe device register */
 #define MAX_NUM_IO_QUEUES 31
 
@@ -55,7 +57,7 @@ DEFINE_BITMAP(ioq_bitmap, MAX_NUM_IO_QUEUES);
 DEFINE_BITMAP(nvme_fgs_bitmap, MAX_NVME_FLOW_GROUPS);
 RTE_DECLARE_PER_LCORE(struct spdk_nvme_qpair *, qpair);
 
-
+// per request
 struct nvme_ctx {
 	hqu_t handle;
 	unsigned long cookie;
@@ -74,15 +76,17 @@ struct nvme_ctx {
 	int cmd; 						//NVME_CMD_[READ or WRITE]
 	int req_cost; 					//cost of request in tokens
 	// command arguments...
-	struct spdk_nvme_ns *ns;		//namespace
 	void* paddr;					//physical addr of buffer to write/read to
 	unsigned long lba;				//logical block address
 	unsigned int lba_count;			//size of IO in logical blocks
 	const struct nvme_completion* completion;	//callback function handle
 	unsigned long time;
+
+	//LIBAIO
+	struct iocb		iocb;
 };
 
-
+// per tenant
 struct nvme_flow_group {
 	int flow_group_id;				// flow group id (index in bitmap)
 	//long ns_id; 					// namespace id
@@ -98,10 +102,15 @@ struct nvme_flow_group {
 	int conn_ref_count;
 };
 
+// per thread (i.e., per core)
 struct nvme_tenant_mgmt {
 	struct list_head tenant_swq;
 	int num_tenants;
 	int num_best_effort_tenants;
+	
+	//LIBAIO
+	struct io_event	*events;
+	io_context_t	aio_ctx;
 };
 
 /*
