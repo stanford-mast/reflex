@@ -1093,6 +1093,40 @@ static int sgl_next_cb(void *cb_arg, uint64_t *address, uint32_t *length)
 	}
 	return 0;
 }
+
+
+void set_iocb_vec(struct iocb* iocb, struct iovec* iov, int cmd, unsigned long lba, 
+			  unsigned int lba_count, int num_sgls, struct nvme_ctx* ctx) {
+
+	void __user *__restrict temp;
+	int i;
+	uint64_t * addr;
+	if (cmd == NVME_CMD_READ)
+		iocb->aio_lio_opcode = IO_CMD_PREADV;
+	else if (cmd == NVME_CMD_WRITE)
+		iocb->aio_lio_opcode = IO_CMD_PWRITEV;
+	else 
+		printf("ERROR: unknown cmd\n");
+
+	ctx->user_buf.sgl_buf.current_sgl = 0; //FIXME: check this. what is sgl_offset equivalent here?
+	iov = (struct iovec*) malloc(sizeof(struct iovec) * num_sgls);
+	for (i=0; i < num_sgls; i++){
+		temp = ctx->user_buf.sgl_buf.sgl[ctx->user_buf.sgl_buf.current_sgl];
+		ctx->user_buf.sgl_buf.current_sgl++;
+		//printf("sgl #%d addr: %x\n", i, temp);
+		iov[i].iov_base = (void*) temp;
+		iov[i].iov_len = SGL_PAGE_SIZE;
+	}
+
+	iocb->aio_fildes = fd;
+	iocb->u.c.buf = iov;
+	iocb->u.c.nbytes = num_sgls; //lba_count * global_ns_sector_size;
+	iocb->u.c.offset = lba * global_ns_sector_size; //FIXME: check this
+	iocb->data = (unsigned long) ctx;
+}
+
+
+
 //TODO: use writev in reflex_server --> IO_CMD_PWRITEV aio command
 long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgls,
 		     unsigned long lba, unsigned int lba_count, unsigned long cookie)
@@ -1119,6 +1153,7 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 		ctx->lba = lba;
 		ctx->lba_count = lba_count;
 
+		set_iocb_vec(&ctx->iocb, ctx->iov, NVME_CMD_WRITE, lba, lba_count, num_sgls, ctx);
 		// add to SW queue
 		struct nvme_sw_queue* swq = nvme_fgs[fg_handle].nvme_swq;
 		ret = nvme_sw_queue_push_back(swq, ctx);
@@ -1164,6 +1199,7 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 		ctx->lba = lba;
 		ctx->lba_count = lba_count;
 
+		set_iocb_vec(&ctx->iocb, ctx->iov, NVME_CMD_READ, lba, lba_count, num_sgls, ctx);
 		// add to SW queue
 		struct nvme_sw_queue* swq = nvme_fgs[fg_handle].nvme_swq;
 		ret = nvme_sw_queue_push_back(swq, ctx);
@@ -1537,10 +1573,10 @@ void nvme_process_completions()
 	for(i =0; i < count; i++) {
 		percpu_get(received_nvme_completions)++;
 		cookie = events[i].data;
-		if (events[i].obj->aio_lio_opcode == IO_CMD_PREAD){
+		if (events[i].obj->aio_lio_opcode == IO_CMD_PREADV){
 			aio_read_cb(cookie);
 		}
-		else if (events[i].obj->aio_lio_opcode == IO_CMD_PWRITE){
+		else if (events[i].obj->aio_lio_opcode == IO_CMD_PWRITEV){
 			aio_write_cb(cookie);
 		}
 		else 

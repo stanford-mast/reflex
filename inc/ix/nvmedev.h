@@ -84,6 +84,7 @@ struct nvme_ctx {
 
 	//LIBAIO
 	struct iocb		iocb;
+	struct iovec*	iov;
 };
 
 // per tenant
