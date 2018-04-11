@@ -240,29 +240,30 @@ again:
 
 
 	/******log monitoring stats***/
-    unsigned long now = rdtsc();
-    unsigned long time_elapsed = (now-start_time)/cycles_per_us;
-    if(time_elapsed >= 1000000) {
-        printf("1 sec passed\n");
-        printf("num_req/sec=%lu\n", util_per_sec->num_req);
-        printf("txbytes/sec=%lu\n", util_per_sec->txbytes);
-        printf("rxbytes/sec=%lu\n", util_per_sec->rxbytes);
+	unsigned long now = rdtsc();
+	unsigned long time_elapsed = (now-start_time)/cycles_per_us;
+	if(time_elapsed >= 1000000) {
+		/*
+		printf("1 sec passed\n");
+		printf("num_req/sec=%lu\n", util_per_sec->num_req);
+		printf("txbytes/sec=%lu\n", util_per_sec->txbytes);
+		printf("rxbytes/sec=%lu\n", util_per_sec->rxbytes);
+		*/
 
-        list_add_tail(util_list, &util_per_sec->link);
-        util_list_len++;
-        printf("------\n");
-        printf("len=%d\n", util_list_len);
-        printf("------\n");
-        
-        util_per_sec = (struct util*) malloc(sizeof(struct util));
-        util_per_sec->num_req = 0;
-        util_per_sec->rxbytes = 0;
-        util_per_sec->txbytes = 0;
-        start_time = rdtsc();
-    }
+		list_add_tail(util_list, &util_per_sec->link);
+		/*
+		util_list_len++;
+		printf("------\n");
+		printf("len=%d\n", util_list_len);
+		printf("------\n");
+		*/
+		util_per_sec = (struct util*) malloc(sizeof(struct util));
+		util_per_sec->num_req = 0;
+		util_per_sec->rxbytes = 0;
+		util_per_sec->txbytes = 0;
+		start_time = rdtsc();
+	}
 	/******log monitoring stats***/
-   
-
 
 	KSTATS_PUSH(percpu_bookkeeping, NULL);
 	cpu_do_bookkeeping();
