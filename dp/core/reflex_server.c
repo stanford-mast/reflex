@@ -487,7 +487,7 @@ static void receive_req(struct pp_conn *conn)
 		
 		switch (header->opcode) {
 		case CMD_SET:
-			util_per_sec->num_req++; //monitoring CPU 
+			util_per_sec->num_req_wr++; //monitoring CPU 
 			
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_WR, &nvme_written_cb);
 			//ixev_nvme_write(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
@@ -496,7 +496,7 @@ static void receive_req(struct pp_conn *conn)
 			conn->nvme_pending++;	
 			break;
 		case CMD_GET:
-			util_per_sec->num_req++; //monitoring CPU 
+			util_per_sec->num_req_rd++; //monitoring CPU 
 			
 			ixev_set_nvme_handler(&req->ctx, IXEV_NVME_RD, &nvme_response_cb);
 			//ixev_nvme_read(conn->nvme_fg_handle, req->buf[0], header->lba, header->lba_count, (unsigned long)&req->ctx);
@@ -687,7 +687,7 @@ void sig_handler(int signo)
             fprintf(fp, "txbytes/sec=%lu\n", u->txbytes);
             fprintf(fp, "rxbytes/sec=%lu\n", u->rxbytes);
             */
-            fprintf(fp, "%lu\t%lu\t%lu\n", u->num_req,u->txbytes,u->rxbytes);
+            fprintf(fp, "%lu\t%lu\t%lu\t%lu\n", u->num_req_wr, u->num_req_rd, u->txbytes,u->rxbytes);
             list_pop(util_list, struct util, link);
             free(u);
         }
@@ -763,7 +763,8 @@ int reflex_server_main(int argc, char *argv[])
     util_list = (struct list_head*) malloc(sizeof(struct list_head));
 
     list_head_init(util_list);
-    util_per_sec->num_req = 0;
+    util_per_sec->num_req_wr = 0;
+    util_per_sec->num_req_rd = 0;
     util_per_sec->rxbytes = 0;
     util_per_sec->txbytes = 0;
     start_time = rdtsc();
