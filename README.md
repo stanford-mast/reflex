@@ -40,7 +40,7 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
 
    ```
    sudo chmod +r /boot/System.map-`uname -r`
-   make -sj64 -C deps/dpdk config T=x86_64-native-linuxapp-gcc
+   make -sj64 -C deps/dpdk config T=x86_64-native-linuxapp-gcc CONFIG_RTE_LIBRTE_MLX5_PMD=y
    make -sj64 -C deps/dpdk
    make -sj64 -C deps/dpdk install T=x86_64-native-linuxapp-gcc DESTDIR=deps/dpdk/x86_64-native-linuxapp-gcc
    export REFLEX_HOME=`pwd`

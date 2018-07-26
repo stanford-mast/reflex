@@ -36,7 +36,7 @@ PCIDMA	= ../deps/pcidma
 INC	+= -I$(PCIDMA)
 LD	= gcc
 LDFLAGS	= -T ix.ld
-LDLIBS	= -lrt -lpthread -lm -lnuma -ldl -lconfig -lpciaccess
+LDLIBS	= -lrt -lpthread -lm -lnuma -ldl -lconfig -lpciaccess -libverbs -lrdmacm
 
 ifneq ($(DEBUG),)
 CFLAGS += -DDEBUG
@@ -72,7 +72,7 @@ ifneq ($(MAKECMDGOALS),clean)
 endif
 
 DPDK_LIBS=
-DPDK_LIBS+=-Wl,-whole-archive $(DPDK)/build/lib/librte_pmd_ixgbe.a $(DPDK)/build/lib/librte_pmd_ena.a $(DPDK)/build/lib/librte_mempool_ring.a $(DPDK)/build/lib/librte_mempool.a -Wl,-no-whole-archive
+DPDK_LIBS+=-Wl,-whole-archive $(DPDK)/build/lib/librte_kvargs.a $(DPDK)/build/lib/librte_pmd_ixgbe.a $(DPDK)/build/lib/librte_pmd_ena.a $(DPDK)/build/lib/librte_pmd_mlx5.a $(DPDK)/build/lib/librte_mempool_ring.a $(DPDK)/build/lib/librte_mempool.a -Wl,-no-whole-archive
 DPDK_LIBS+=$(DPDK)/build/lib/librte_mbuf.a
 DPDK_LIBS+=$(DPDK)/build/lib/librte_ethdev.a
 DPDK_LIBS+=$(DPDK)/build/lib/librte_hash.a
