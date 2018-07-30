@@ -35,7 +35,7 @@ There is currently no binary distribution of ReFlex. You will therefore need to 
 2. Install library dependencies: 
 
    ```
-   sudo apt-get install libconfig-dev libnuma-dev libpciaccess-dev libaio-dev libevent-dev g++-multilib
+   sudo apt-get install libconfig-dev libnuma-dev libpciaccess-dev libaio-dev libevent-dev g++-multilib libcunit1-dev libssl-dev
    ```
 
 3. Build the dependecies:
