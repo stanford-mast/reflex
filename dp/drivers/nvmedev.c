@@ -853,12 +853,12 @@ long bsys_nvme_register_flow(long flow_group_id, unsigned long cookie,
 		}
 		
 		if (latency_us_SLO == 0){
-			printf("Register tenant %ld (port id: %ld). Managed by thread %ld. Best-effort tenant. \n", 
-					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr));
+			printf("Register tenant %ld (port id: %ld). Managed by thread %ld(RTE_PER) %ld(percpu). Best-effort tenant. \n", 
+					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr), percpu_get(cpu_id));
 		}
 		else{
-			printf("Register tenant %ld (port id: %ld). Managed by thread %ld. IOPS_SLO: %lu, r/w %d, scaled_IOPS: %lu tokens/s, latency SLO: %lu us. \n", 
-					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr),  IOPS_SLO, rw_ratio_SLO, nvme_fg->scaled_IOPS_limit, latency_us_SLO);
+			printf("Register tenant %ld (port id: %ld). Managed by thread %ld(RTE_PER) %ld(percpu). IOPS_SLO: %lu, r/w %d, scaled_IOPS: %lu tokens/s, latency SLO: %lu us. \n", 
+					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr), percpu_get(cpu_id), IOPS_SLO, rw_ratio_SLO, nvme_fg->scaled_IOPS_limit, latency_us_SLO);
 		}
 	}
 	nvme_fg->conn_ref_count++;

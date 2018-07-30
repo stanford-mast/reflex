@@ -115,7 +115,7 @@ int count_stats = 0;
  * Returns the number of new packets received.
  */
 int eth_process_poll(void) 
-{
+{   
 	int i, ret = 0;
 	int count = 0; 
 	bool empty;
@@ -132,9 +132,13 @@ int eth_process_poll(void)
 	 */
 	do {
 		empty = true;
+
+        // This loops over each queue of a SINGLE core (current behaviour is 1 queue to 1 core)
+        // NOTE THIS MEANS i IS AN INDEX OF A CORE'S QUEUE, NOT OF THE CORE ITSELF.
 		for (i = 0; i < percpu_get(eth_num_queues); i++) {
-			ret = rte_eth_rx_burst(active_eth_port, i, &rx_pkts[i], 1); //burst 1 because check queues round-robin 
-			if (ret) {
+            //burst 1 because check queues round-robin
+			ret = rte_eth_rx_burst(active_eth_port, percpu_get(cpu_id), &rx_pkts[i], 1);
+            if (ret) {
 				empty = false;
 				m = rx_pkts[i];
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *)); 
@@ -315,6 +319,10 @@ int ethdev_init_cpu(void)
 		exit(0);
 	}
 	percpu_get(tx_buf) = tx_buffer;
+
+    percpu_get(eth_num_queues) = rte_eth_dev_count();
+
+    return 0;
 }
 
 
