@@ -335,9 +335,10 @@ void eth_process_send(void)
 	int i, nr;
 	struct eth_tx_queue *txq;
 
-
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-		rte_eth_tx_buffer_flush(active_eth_port, i, percpu_get(tx_buf)); 
+		// NOTE: rte_eth_tx_buffer_flush appears to flush all queues regardless of the parameter given.
+        // Currently incompatible with multiple queues per CPU core due to cpu_id being queue number.
+	    rte_eth_tx_buffer_flush(active_eth_port, percpu_get(cpu_id), percpu_get(tx_buf)); 
 	}
 
 
