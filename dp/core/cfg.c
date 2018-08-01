@@ -168,79 +168,79 @@ static int str_to_ip_addr(const char *src, unsigned char *dst)
 	return 0;
 }
 
-uint32_t convert_str_ip_to_uint32(const char *src, uint32_t *out) {
-    uint32_t ip;
-    unsigned char a, b, c, d;
+uint32_t convert_str_ip_to_uint32(const char *src, uint32_t *out) 
+{
+	uint32_t ip;
+	unsigned char a, b, c, d;
 	if (sscanf(src, "%hhu.%hhu.%hhu.%hhu", &a, &b, &c, &d) != 4) return -EINVAL;
-    ip = (a << 24) + (b << 16) + (c << 8) + (d);
-    memcpy(out, &ip, sizeof(uint32_t));
-    return 0;
+	ip = (a << 24) + (b << 16) + (c << 8) + (d);
+	memcpy(out, &ip, sizeof(uint32_t));
+	return 0;
 }
 
-int parse_cfg_fdir_rules(uint8_t port_id) {
-    int ret;
-    const config_setting_t *fdir = NULL;
-    const config_setting_t *entry = NULL;
-    
-    fdir = config_lookup(&cfg, "fdir");
-    if (!fdir) {
-        printf("No FDIR rules defined in config\n");
-        return 0;
-    }
-    
-    for (int i = 0; i < config_setting_length(fdir); i++) {
-        entry = config_setting_get_elem(fdir, i);
-        
-        // Parse destination IP address.
-        const char *dst_ip_str = NULL;
-        uint32_t dst_ip;
-        config_setting_lookup_string(entry, "dst_ip", &dst_ip_str);
-        if (!dst_ip_str) return -EINVAL;
-        if (convert_str_ip_to_uint32(dst_ip_str, &dst_ip)) return -EINVAL;
-        printf("\tdst_ip = %lu, ", dst_ip);
-        
-        // Parse source IP address.
-        const char *src_ip_str = NULL;
-        uint32_t src_ip;
-        config_setting_lookup_string(entry, "src_ip", &src_ip_str);
-        if (!src_ip_str) return -EINVAL;
-        if (convert_str_ip_to_uint32(src_ip_str, &src_ip)) return -EINVAL;
-        printf("\tsrc_ip = %lu, ", src_ip); 
-        
-        // Parse destination port.
-        uint16_t dst_port;
-        config_setting_lookup_int(entry, "dst_port", &dst_port);
-        if (!dst_port) return -EINVAL;
-        printf("\tdst_port = %u --> ", dst_port);
+int parse_cfg_fdir_rules(uint8_t port_id) 
+{
+	int ret;
+	const config_setting_t *fdir = NULL;
+	const config_setting_t *entry = NULL;
+	
+	fdir = config_lookup(&cfg, "fdir");
+	if (!fdir) {
+		printf("No FDIR rules defined in config\n");
+		return 0;
+	}
+	
+	for (int i = 0; i < config_setting_length(fdir); i++) {
+		entry = config_setting_get_elem(fdir, i);
+		
+		// Parse destination IP address.
+		const char *dst_ip_str = NULL;
+		uint32_t dst_ip;
+		config_setting_lookup_string(entry, "dst_ip", &dst_ip_str);
+		if (!dst_ip_str) return -EINVAL;
+		if (convert_str_ip_to_uint32(dst_ip_str, &dst_ip)) return -EINVAL;
+		printf("\tdst_ip = %lu, ", dst_ip);
+		
+		// Parse source IP address.
+		const char *src_ip_str = NULL;
+		uint32_t src_ip;
+		config_setting_lookup_string(entry, "src_ip", &src_ip_str);
+		if (!src_ip_str) return -EINVAL;
+		if (convert_str_ip_to_uint32(src_ip_str, &src_ip)) return -EINVAL;
+		printf("\tsrc_ip = %lu, ", src_ip); 
+		
+		// Parse destination port.
+		uint16_t dst_port;
+		config_setting_lookup_int(entry, "dst_port", &dst_port);
+		if (!dst_port) return -EINVAL;
+		printf("\tdst_port = %u --> ", dst_port);
 
-        // Parse queue number.
-        uint16_t queue;                                         // Technically this should be uint8_t, but calling
-        config_setting_lookup_int(entry, "queue", &queue);      // config_setting_lookup on that overwrites stack.
-        printf("\tqueue %u\n", queue);
-        
-        uint8_t drop = 0;   // DEBUG: HARDCODED TO ZERO FOR NOW.
-        uint8_t soft_id = i;
+		// Parse queue number.
+		uint16_t queue;                                    // Technically queue should be uint8_t, but calling
+		config_setting_lookup_int(entry, "queue", &queue); // config_setting_lookup_int on that overwrites stack.
+		printf("\tqueue %u\n", queue);
+		
+		uint8_t drop = 0; // Currently hardcoded to zero, adding drop field/rules in cfg would be possible.
+		uint8_t soft_id = i;
 
-        // Create filter struct.
-        struct rte_eth_fdir_filter filter;
-        memset(&filter, 0, sizeof(filter));
-        filter.soft_id = soft_id;
-        filter.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_TCP;
-        filter.input.flow.tcp4_flow.ip.src_ip = hton32(src_ip);
-        filter.input.flow.tcp4_flow.ip.dst_ip = hton32(dst_ip);
-        filter.input.flow.tcp4_flow.src_port = hton16(0);
-        filter.input.flow.tcp4_flow.dst_port = hton16(dst_port);
-        filter.action.rx_queue = queue;
-        filter.action.behavior = drop ? RTE_ETH_FDIR_REJECT : RTE_ETH_FDIR_ACCEPT;
-        filter.action.report_status = RTE_ETH_FDIR_REPORT_ID;
+		// Create filter struct.
+		struct rte_eth_fdir_filter filter;
+		memset(&filter, 0, sizeof(filter));
+		filter.soft_id = soft_id;
+		filter.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_TCP;
+		filter.input.flow.tcp4_flow.ip.src_ip = hton32(src_ip);
+		filter.input.flow.tcp4_flow.ip.dst_ip = hton32(dst_ip);
+		filter.input.flow.tcp4_flow.src_port = hton16(0);
+		filter.input.flow.tcp4_flow.dst_port = hton16(dst_port);
+		filter.action.rx_queue = queue;
+		filter.action.behavior = drop ? RTE_ETH_FDIR_REJECT : RTE_ETH_FDIR_ACCEPT;
+		filter.action.report_status = RTE_ETH_FDIR_REPORT_ID;
 
-        // Apply filter struct.
-        ret = rte_eth_dev_filter_ctrl(port_id, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, (void *)&filter);
-        if (ret < 0) {
-            return ret;
-        }
-    }
-    return 0;
+		// Apply filter struct.
+		ret = rte_eth_dev_filter_ctrl(port_id, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, (void *)&filter);
+		if (ret < 0) return ret;
+	}
+	return 0;
 }
 
 static int parse_arp(void)

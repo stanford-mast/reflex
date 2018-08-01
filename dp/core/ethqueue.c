@@ -115,7 +115,7 @@ int count_stats = 0;
  * Returns the number of new packets received.
  */
 int eth_process_poll(void) 
-{   
+{
 	int i, ret = 0;
 	int count = 0; 
 	bool empty;
@@ -133,12 +133,13 @@ int eth_process_poll(void)
 	do {
 		empty = true;
 
-        // This loops over each queue of a SINGLE core (current behaviour is 1 queue to 1 core)
-        // NOTE THIS MEANS i IS AN INDEX OF A CORE'S QUEUE, NOT OF THE CORE ITSELF.
+		// This loops over each queue of a single core (current behaviour is 1 queue to 1 core)
+		// Note that i is the index within a core's list of queues, not the global list of queues.
 		for (i = 0; i < percpu_get(eth_num_queues); i++) {
-            //burst 1 because check queues round-robin
+			//burst 1 because check queues round-robin
+			//  Note: Using percpu_get(cpu_id) requires one queue to one core and identical cpu and queue numbering.
 			ret = rte_eth_rx_burst(active_eth_port, percpu_get(cpu_id), &rx_pkts[i], 1);
-            if (ret) {
+			if (ret) {
 				empty = false;
 				m = rx_pkts[i];
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *)); 
@@ -320,9 +321,10 @@ int ethdev_init_cpu(void)
 	}
 	percpu_get(tx_buf) = tx_buffer;
 
-    percpu_get(eth_num_queues) = rte_eth_dev_count();
+	// Assign each CPU the correct number of queues.
+	percpu_get(eth_num_queues) = rte_eth_dev_count();
 
-    return 0;
+	return 0;
 }
 
 
@@ -337,8 +339,8 @@ void eth_process_send(void)
 
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
 		// NOTE: rte_eth_tx_buffer_flush appears to flush all queues regardless of the parameter given.
-        // Currently incompatible with multiple queues per CPU core due to cpu_id being queue number.
-	    rte_eth_tx_buffer_flush(active_eth_port, percpu_get(cpu_id), percpu_get(tx_buf)); 
+		// Currently incompatible with multiple queues per CPU core due to cpu_id being queue number.
+		rte_eth_tx_buffer_flush(active_eth_port, percpu_get(cpu_id), percpu_get(tx_buf)); 
 	}
 
 
