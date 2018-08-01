@@ -619,7 +619,7 @@ void *pp_main(void *arg)
 {
 	int ret;
 	conn_opened = 0;
-	printf("pp_main on cpu %d, thread self is %x\n", percpu_get(cpu_nr),pthread_self());
+	printf("pp_main on cpu %d, thread self is %x\n", percpu_get(cpu_nr), pthread_self());
 	struct launch_req *req;
 
 	ret = ixev_init_thread();

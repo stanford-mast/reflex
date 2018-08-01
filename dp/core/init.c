@@ -166,9 +166,9 @@ static struct rte_eth_conf default_eth_conf = {
 		.header_split   = 0, /**< Header Split disabled */
 		.hw_ip_checksum = 1, /**< IP checksum offload disabled */
 		.hw_vlan_filter = 0, /**< VLAN filtering disabled */
-		.jumbo_frame    = 1, /**< Jumbo Frame Support disabled */
+		.jumbo_frame	= 1, /**< Jumbo Frame Support disabled */
 		.hw_strip_crc   = 1, /**< CRC stripped by hardware */
-		.mq_mode        = ETH_MQ_RX_RSS,
+		.mq_mode		= ETH_MQ_RX_RSS,
 	},
 	.rx_adv_conf = {
 		.rss_conf = {
@@ -181,8 +181,131 @@ static struct rte_eth_conf default_eth_conf = {
 	.fdir_conf = {
 		.mode = RTE_FDIR_MODE_PERFECT, 
 		.pballoc = RTE_FDIR_PBALLOC_256K,
+		.mask = {
+			.vlan_tci_mask = 0x0,
+			.ipv4_mask = {
+				.src_ip = 0xFFFFFFFF,
+				.dst_ip = 0xFFFFFFFF,
+			},
+			.src_port_mask = 0,
+			.dst_port_mask = 0xFFFF,
+			.mac_addr_byte_mask = 0,
+			.tunnel_type_mask = 0,
+			.tunnel_id_mask = 0,
+		},
+		.drop_queue = 127,
+		.flex_conf = {
+			.nb_payloads = 0,
+			.nb_flexmasks = 0,
+		},
 	},
 };
+
+/**
+ * add_fdir_fules
+ * Sets up flow director to direct incoming packets.
+ */
+int add_fdir_rules(uint8_t port_id)
+{
+	log_info("Adding FDIR rules.\n");
+	int ret;
+
+	// Check that flow director is supported.
+	if (ret = rte_eth_dev_filter_supported(port_id, RTE_ETH_FILTER_FDIR)) {
+		log_err("This device does not support Flow Director (Error %d).\n", ret);
+		return -ENOTSUP;
+	}
+
+	// Flush any existing flow director rules.
+	ret = rte_eth_dev_filter_ctrl(port_id, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_FLUSH, NULL);
+	if (ret < 0) {
+		log_err("Could not flush FDIR entries.\n");
+		return -1;
+	}
+
+	// Add flow director rules (currently added from static config file in cfg.c).
+	ret = parse_cfg_fdir_rules(port_id);
+
+	return ret;
+}
+
+/**
+ * init_port
+ * Sets up the ethernet port on a given port id.
+ */
+static void init_port(uint8_t port_id, struct eth_addr *mac_addr)
+{
+	int ret;
+
+	uint16_t nb_rx_q = CFG.num_cpus; 
+	uint16_t nb_tx_q = CFG.num_cpus;
+	struct rte_eth_conf *dev_conf; 
+
+	dev_conf = &default_eth_conf;
+
+	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; //1024
+	uint16_t nb_rx_desc = ETH_DEV_RX_QUEUE_SZ; //512
+	struct rte_eth_dev_info dev_info;
+	struct rte_eth_txconf* txconf;
+	struct rte_eth_rxconf* rxconf; 
+	uint16_t mtu;
+		
+	if (dev_conf->rxmode.jumbo_frame) {
+		dev_conf->rxmode.max_rx_pkt_len = 9000 + ETHER_HDR_LEN + ETHER_CRC_LEN;
+	}
+	   
+	ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, dev_conf);
+	if (ret < 0) rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n", ret, (unsigned) port_id);
+
+	rte_eth_dev_info_get(port_id, &dev_info);
+	txconf = &dev_info.default_txconf;  //FIXME: this should go here but causes TCP rx bug
+	rxconf = &dev_info.default_rxconf;
+
+	if (dev_conf->rxmode.jumbo_frame) {
+		rte_eth_dev_set_mtu(port_id, 9000);	
+		rte_eth_dev_get_mtu(port_id, &mtu);
+		printf("Enable jumbo frames. MTU size is %d\n", mtu);
+		//FIXME: rx_qinfo crashes with ixgbe DPDK driver (but works fine on AWS)
+		//struct rte_eth_rxq_info rx_qinfo;
+		//rte_eth_rx_queue_info_get(port_id, 0, &rx_qinfo);
+		//rx_qinfo.scattered_rx = 1;
+		txconf->txq_flags = 0; 
+	}
+
+	// initialize one queue per cpu
+	for (int i = 0; i < CFG.num_cpus; i++) {
+		log_info("setting up TX and RX queues...\n");
+		ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), txconf);
+		if (ret < 0) rte_exit(EXIT_FAILURE, "tx queue setup: err=%d, port=%u\n", ret, (unsigned) port_id);
+		rte_eth_rx_queue_setup(port_id, i, nb_rx_desc, rte_eth_dev_socket_id(port_id), rxconf, dpdk_pool);
+		if (ret <0 ) rte_exit(EXIT_FAILURE, "rx queue setup: err=%d, port=%u\n", ret, (unsigned) port_id);
+	}
+		 
+	rte_eth_promiscuous_enable(port_id);
+		
+	ret = rte_eth_dev_start(port_id);
+	if (ret < 0) {
+		printf("ERROR starting device at port %d\n", port_id);
+	}
+	else {
+		printf("started device at port %d\n", port_id);
+	}
+		
+	struct rte_eth_link	link;
+	rte_eth_link_get(port_id, &link);
+
+	if (!link.link_status) {
+		log_warn("eth:\tlink appears to be down, check connection.\n");
+	} else {
+		printf("eth:\tlink up - speed %u Mbps, %s\n",
+			   (uint32_t) link.link_speed,
+			   (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
+			   ("full-duplex") : ("half-duplex"));
+		rte_eth_macaddr_get(port_id, mac_addr);
+		active_eth_port = port_id;
+	}
+}
+
 
 /**
  * init_ethdev - initializes an ethernet device
@@ -192,133 +315,36 @@ static struct rte_eth_conf default_eth_conf = {
 static int init_ethdev(void)
 {
 	int ret;
-	int i;
 
 	// DPDK init for pci ethdev already done in dpdk_init()
 	uint8_t port_id;
-
-	// Allocate 1 RX and 1 TX queue per CPU core
-	uint16_t nb_rx_q = CFG.num_cpus; 
-	uint16_t nb_tx_q = CFG.num_cpus;
-	struct rte_eth_conf *dev_conf; 
-
-	dev_conf = &default_eth_conf;
-
 	uint8_t nb_ports;
-	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; //1024
-	uint16_t nb_rx_desc = ETH_DEV_RX_QUEUE_SZ; //512
-	struct rte_eth_dev_info dev_info;
-	struct rte_eth_txconf* txconf; 
-	struct rte_eth_rxconf* rxconf; 
 	struct ether_addr mac_addr;
-	uint16_t mtu;
-
 
 	nb_ports = rte_eth_dev_count();
-	if (nb_ports == 0)
-		rte_exit(EXIT_FAILURE, "No Ethernet ports - exiting\n");
-
-	if (nb_ports > 1)
-		printf("WARNING: only 1 ethernet port is used\n");
-
-	if (nb_ports > RTE_MAX_ETHPORTS)
-		nb_ports = RTE_MAX_ETHPORTS;
-
-	//FIXME: figure out device config for fdir....
-	dev_conf->fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
-	dev_conf->fdir_conf.pballoc = RTE_FDIR_PBALLOC_256K;
-	dev_conf->fdir_conf.status = RTE_FDIR_REPORT_STATUS;
-
-	dev_conf->fdir_conf.mask.vlan_tci_mask = 0x0;
-	dev_conf->fdir_conf.mask.ipv4_mask.src_ip = 0xFFFFFFFF;
-	dev_conf->fdir_conf.mask.ipv4_mask.dst_ip = 0xFFFFFFFF;
-	dev_conf->fdir_conf.mask.src_port_mask = 0; //don't take into account src_port
-	dev_conf->fdir_conf.mask.dst_port_mask = 0xFFFF;
-
-	dev_conf->fdir_conf.mask.mac_addr_byte_mask = 0;
-	dev_conf->fdir_conf.mask.tunnel_type_mask = 0;
-	dev_conf->fdir_conf.mask.tunnel_id_mask = 0;
-	dev_conf->fdir_conf.drop_queue = 127;
-	dev_conf->fdir_conf.flex_conf.nb_payloads = 0;
-	dev_conf->fdir_conf.flex_conf.nb_flexmasks = 0;
-
-	for (port_id = 0; port_id < nb_ports; port_id++) {		
-
-		if (dev_conf->rxmode.jumbo_frame) {
-			dev_conf->rxmode.max_rx_pkt_len = 9000 + ETHER_HDR_LEN + ETHER_CRC_LEN;
-		}
-
-		ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, dev_conf);
-		if (ret < 0) {
-			rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
-						 ret, (unsigned) port_id);
-		}
-
-		rte_eth_dev_info_get(port_id, &dev_info);
-		txconf = &dev_info.default_txconf;  //FIXME: this should go here but causes TCP rx bug
-		rxconf = &dev_info.default_rxconf;
-				
-		if (dev_conf->rxmode.jumbo_frame) {
-			rte_eth_dev_set_mtu(port_id, 9000);	
-			rte_eth_dev_get_mtu(port_id, &mtu);
-			printf("Enable jumbo frames. MTU size is %d\n", mtu);
-			//FIXME: rx_qinfo crashes with ixgbe DPDK driver (but works fine on AWS)
-			//struct rte_eth_rxq_info rx_qinfo;
-            //rte_eth_rx_queue_info_get(port_id, 0, &rx_qinfo);
-			//rx_qinfo.scattered_rx = 1;
-			txconf->txq_flags = 0; 
-		}
+	if (nb_ports == 0) rte_exit(EXIT_FAILURE, "No Ethernet ports - exiting\n");
+	if (nb_ports > 1) printf("WARNING: only 1 ethernet port is used\n");
+	if (nb_ports > RTE_MAX_ETHPORTS) nb_ports = RTE_MAX_ETHPORTS;
 	
-		// initialize one queue per cpu
-		for (i = 0; i < CFG.num_cpus; i++) {
-			log_info("setting up TX and RX queues...\n");
-			ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), txconf);
-			if (ret < 0) {
-				rte_exit(EXIT_FAILURE, "rte_eth_tx_queue_setup:err=%d, port=%u\n",
-						 ret, (unsigned) port_id);
-			}
-			rte_eth_rx_queue_setup(port_id, i, nb_rx_desc, rte_eth_dev_socket_id(port_id), rxconf, dpdk_pool);
-			if (ret <0 ) {
-				rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
-						 ret, (unsigned) port_id);
-			}
-		}
+	for (port_id = 0; port_id < nb_ports; port_id++) {
+		init_port(port_id, &mac_addr);
+		log_info("Ethdev on port %d initialised.\n", port_id);
 		
-		ret = rte_eth_dev_start(port_id);
-		if (ret < 0) {
-			printf("ERROR starting device at port %d\n", port_id);
-		}
-		else {
-			printf("started device at port %d\n", port_id);
-		}
-		
-		struct rte_eth_link	link;
-		rte_eth_link_get(port_id, &link);
+		ret = add_fdir_rules(port_id);
 
-		if (!link.link_status) {
-			log_warn("eth:\tlink appears to be down, check connection.\n");
+		if (ret) {
+			log_err("Adding FDIR rules failed. (Error %d)\n", ret);
 		} else {
-			printf("eth:\tlink up - speed %u Mbps, %s\n",
-				   (uint32_t) link.link_speed,
-				   (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
-				   ("full-duplex") : ("half-duplex\n"));
-			rte_eth_macaddr_get(port_id, &mac_addr);
-			active_eth_port = port_id;
-		}
-
-		rte_eth_promiscuous_enable(port_id);
-
+			log_info("All FDIR rules added.\n");
+		}	
 	}
 	
 	struct eth_addr* macaddr = &mac_addr;
 	CFG.mac = *macaddr;
+	//percpu_get(eth_num_queues) = CFG.num_cpus; //NOTE: assume num tx queues == num rx queues
+	percpu_get(eth_num_queues) = nb_ports;
 
-	percpu_get(eth_num_queues) = nb_rx_q; //NOTE: assume num tx queues == num rx queues
-	parse_fdir();
 	return 0;
-
-err:
-	return ret;
 }
 
 /**
