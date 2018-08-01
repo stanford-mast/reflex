@@ -128,7 +128,7 @@ struct init_vector_t {
 
 static struct init_vector_t init_tbl[] = {
 	{ "CPU",     cpu_init,     NULL, NULL},
-	{ "cfgcpu",     init_parse_cpu,     NULL, NULL},            // after cpu  
+    { "cfgcpu",     init_parse_cpu,     NULL, NULL},            // after cpu  
 	{ "dpdk",    dpdk_init,    NULL, NULL},
 	{ "timer",   timer_init,   timer_init_cpu, NULL},
 	{ "net",     net_init,     NULL, NULL},
@@ -157,6 +157,8 @@ static char **init_argv;
 static int args_parsed;
 
 volatile int uaccess_fault;
+
+bool PROCESS_SHOULD_BE_SECONDARY = false;
 
 
 static struct rte_eth_conf default_eth_conf = {
@@ -191,15 +193,15 @@ static struct rte_eth_conf default_eth_conf = {
  */
 static int init_ethdev(void)
 {
-	int ret;
+    int ret;
 	int i;
 
 	// DPDK init for pci ethdev already done in dpdk_init()
 	uint8_t port_id;
 
 	// Allocate 1 RX and 1 TX queue per CPU core
-	uint16_t nb_rx_q = CFG.num_cpus; 
-	uint16_t nb_tx_q = CFG.num_cpus;
+	uint16_t nb_rx_q = CFG.num_cpus; //DEBUGGG
+	uint16_t nb_tx_q = CFG.num_cpus; //DEBUGGG
 	struct rte_eth_conf *dev_conf; 
 
 	dev_conf = &default_eth_conf;
@@ -213,6 +215,10 @@ static int init_ethdev(void)
 	struct ether_addr mac_addr;
 	uint16_t mtu;
 
+    //if(rte_eal_process_type() == RTE_PROC_SECONDARY) { //DEBUGGG
+    //    percpu_get(eth_num_queues) = 1;
+    //    return 0;
+    //}
 
 	nb_ports = rte_eth_dev_count();
 	if (nb_ports == 0)
@@ -224,7 +230,8 @@ static int init_ethdev(void)
 	if (nb_ports > RTE_MAX_ETHPORTS)
 		nb_ports = RTE_MAX_ETHPORTS;
 
-	//FIXME: figure out device config for fdir....
+	//printf("DEBUGGG: checkpoint 1\n");
+    //FIXME: figure out device config for fdir....
 	dev_conf->fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
 	dev_conf->fdir_conf.pballoc = RTE_FDIR_PBALLOC_256K;
 	dev_conf->fdir_conf.status = RTE_FDIR_REPORT_STATUS;
@@ -242,17 +249,20 @@ static int init_ethdev(void)
 	dev_conf->fdir_conf.flex_conf.nb_payloads = 0;
 	dev_conf->fdir_conf.flex_conf.nb_flexmasks = 0;
 
+    //printf("DEBUGGG: nb_ports: %d\n", nb_ports);
 	for (port_id = 0; port_id < nb_ports; port_id++) {		
 
 		if (dev_conf->rxmode.jumbo_frame) {
 			dev_conf->rxmode.max_rx_pkt_len = 9000 + ETHER_HDR_LEN + ETHER_CRC_LEN;
 		}
 
-		ret = rte_eth_dev_configure(port_id, nb_rx_q, nb_tx_q, dev_conf);
-		if (ret < 0) {
-			rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
-						 ret, (unsigned) port_id);
-		}
+        if(rte_eal_process_type() == RTE_PROC_PRIMARY) { //DEBUGGG
+            ret = rte_eth_dev_configure(port_id, nb_rx_q * CFG.num_process, nb_tx_q * CFG.num_process, dev_conf); //DEBUGGG added the CFG.num_process *
+            if (ret < 0) {
+			    rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
+			    			 ret, (unsigned) port_id);
+		    }
+        }
 
 		rte_eth_dev_info_get(port_id, &dev_info);
 		txconf = &dev_info.default_txconf;  //FIXME: this should go here but causes TCP rx bug
@@ -268,23 +278,34 @@ static int init_ethdev(void)
 			//rx_qinfo.scattered_rx = 1;
 			txconf->txq_flags = 0; 
 		}
-	
+
+        printf("===DEBUGGG: num CPU: %d\n", CFG.num_cpus);
 		// initialize one queue per cpu
-		for (i = 0; i < CFG.num_cpus; i++) {
-			log_info("setting up TX and RX queues...\n");
-			ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), txconf);
-			if (ret < 0) {
-				rte_exit(EXIT_FAILURE, "rte_eth_tx_queue_setup:err=%d, port=%u\n",
-						 ret, (unsigned) port_id);
-			}
-			rte_eth_rx_queue_setup(port_id, i, nb_rx_desc, rte_eth_dev_socket_id(port_id), rxconf, dpdk_pool);
-			if (ret <0 ) {
-				rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
-						 ret, (unsigned) port_id);
-			}
-		}
+        if(rte_eal_process_type() == RTE_PROC_PRIMARY) { //DEBUGGG
+
+		    for (i = 0; i < CFG.num_cpus * CFG.num_process; i++) { //DEBUGGG
+		    //for (i = 0; i < CFG.num_cpus; i++) { //DEBUGGG
+                
+                //for (i = 0; i < 2; i++) { //DEBUGGG
+		    	log_info("setting up TX and RX queues...\n");
+		        printf("DEBUGGG: calling PRIMARY rte_eth_tx_queue_setup with: %d, %d, %d, %d\n", port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id));
+
+                ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), txconf); //DEBUGGG i->0
+		    	if (ret < 0) {
+		    		rte_exit(EXIT_FAILURE, "rte_eth_tx_queue_setup:err=%d, port=%u\n",
+		    				 ret, (unsigned) port_id);
+		    	}
+                printf("DEBUGGG: calling PRIMARY rte_eth_rx_queue_setup with: %d, %d, %d, %d\n", port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id));
+
+		    	rte_eth_rx_queue_setup(port_id, i, nb_rx_desc, rte_eth_dev_socket_id(port_id), rxconf, dpdk_pool); //DEBUGGG i->0
+		    	if (ret <0 ) {
+		    		rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
+		    				 ret, (unsigned) port_id);
+		    	}
+		    } //DEBUGGG
+        }
 		
-		ret = rte_eth_dev_start(port_id);
+        ret = rte_eth_dev_start(port_id);
 		if (ret < 0) {
 			printf("ERROR starting device at port %d\n", port_id);
 		}
@@ -292,6 +313,7 @@ static int init_ethdev(void)
 			printf("started device at port %d\n", port_id);
 		}
 		
+
 		struct rte_eth_link	link;
 		rte_eth_link_get(port_id, &link);
 
@@ -307,6 +329,7 @@ static int init_ethdev(void)
 		}
 
 		rte_eth_promiscuous_enable(port_id);
+        printf("DEBUGGG: checkpoint %d\n", port_id + 2);
 
 	}
 	
@@ -315,9 +338,12 @@ static int init_ethdev(void)
 
 	percpu_get(eth_num_queues) = nb_rx_q; //NOTE: assume num tx queues == num rx queues
 	parse_fdir();
+
+
 	return 0;
 
 err:
+
 	return ret;
 }
 
@@ -415,10 +441,16 @@ static int init_fg_cpu(void)
 	start = RTE_PER_LCORE(cpu_nr);
 
 	bitmap_init(fg_bitmap, ETH_MAX_TOTAL_FG, 0);
+
+    printf("++++++++++++     DEBUGGG: start: %d, nr_flow_grpups: %d      +++++++++++++\n", start, nr_flow_groups);
+
+
 	for (fg_id = start; fg_id < nr_flow_groups; fg_id += CFG.num_cpus)
 		bitmap_set(fg_bitmap, fg_id);
 
 	eth_fg_assign_to_cpu(fg_bitmap, RTE_PER_LCORE(cpu_nr));
+    
+    printf("++++++++++++     DEBUGGG 2: start: %d, nr_flow_grpups: %d      +++++++++++++\n", start, nr_flow_groups);
 
 	for (fg_id = start; fg_id < nr_flow_groups; fg_id += CFG.num_cpus) {
 		eth_fg_set_current(fgs[fg_id]);
@@ -435,10 +467,12 @@ static int init_fg_cpu(void)
 		timer_init_fg();
 	}
 
+    //printf("DEBUGGG: init_fg_cpu checkpoint 2\n");
+
 	unset_current_fg();
 
 	//FIXME: figure out flow group stuff, this is temp fix for fg_id == cpu_id (no migration)
-	fg_id = percpu_get(cpu_id); 
+	fg_id = percpu_get(cpu_id); //DEBUGGG 
 	//fg_id = outbound_fg_idx();
 	fgs[fg_id] = malloc(sizeof(struct eth_fg));
 	fgs[fg_id] = malloc(sizeof(struct eth_fg));
@@ -449,6 +483,8 @@ static int init_fg_cpu(void)
 	fgs[fg_id]->fg_id = fg_id;
 	//fgs[fg_id]->eth = percpu_get(eth_rxqs[0])->dev;
 	tcp_init(fgs[fg_id]);
+
+    //printf("DEBUGGG: init_fg_cpu checkpoint 3\n");
 
 	return 0;
 }
@@ -506,7 +542,7 @@ static int init_hw(void)
 	int i, ret = 0;
 	pthread_t tid;
 	int j;
-	int fg_id;
+	int fg_id; //DEBUGGG
 
 	// will spawn per-cpu initialization sequence on CPU0
 	ret = init_create_cpu(CFG.cpu[0], 1);
@@ -640,21 +676,55 @@ int main(int argc, char *argv[])
 
 	log_info("init: starting IX\n");
 
+    //DEBUGGG
+    if(strcmp(argv[1], "secondary") == 0) {
+        PROCESS_SHOULD_BE_SECONDARY = true;
+    }
+
+    //DEBUGGG start
+    //printf("DEBUGGG: argv[1]: %s\n", argv[1]);
+    //if(strcmp(argv[1], "secondary") == 0) {
+    //        printf("DEBUGGG: in if statement\n");
+    //        PROCESS_SHOULD_BE_SECONDARY = true;
+    //}
+    //DEBUGGG end
+
+
 	log_info("init: cpu phase\n");
 	for (i = 0; init_tbl[i].name; i++)
 		if (init_tbl[i].f) {
+            printf("DEBUGGG: about to call a function: %s\n", init_tbl[i].name);
 			ret = init_tbl[i].f();
 			log_info("init: module %-10s %s\n", init_tbl[i].name, (ret ? "FAILURE" : "SUCCESS"));
 			if (ret)
 				panic("could not initialize IX\n");
-		}
+	}
+
+    printf("---DEBUGGG: DONE WITH INITS---\n");
+
+    //DEBUGGG start
+    //int primary = -1;
+    //if(argc == 2) {
+    //    primary = atoi(argv[1]);
+        //printf("DEBUGGG: num instances: %d\n", num_instances);
+    //}
+    //if(num_instances > 1) {
+        //TODO: manage various instances of Reflex
+    //}
+    //DEBUGGG end
+    //printf("DEBUGGG: arg parsed: %d\n", args_parsed);
 
 	//ret = echoserver_main(argc - args_parsed, &argv[args_parsed]);
-	if (argc > 1)
+	if (argc > 2) { //DEBUGGG changed 1 to 2
 		ret = reflex_client_main(argc - args_parsed, &argv[args_parsed]);
-	else
-		ret = reflex_server_main(argc - args_parsed, &argv[args_parsed]);
-	
+    } else {//if (argc == 2) { //DEBUGGG made it an else if not just else
+        //printf("DEBUGGG: starting server \n");
+        //if(primary == 1) {
+		    ret = reflex_server_main(argc - args_parsed, &argv[args_parsed]);
+        //} else {
+            //TODO: manage secondary processes
+        //}
+    }
 	if (ret) {
 		//log_err("init: failed to start echoserver\n");
 		log_err("init: failed to start reflex server\n");

@@ -83,6 +83,7 @@ int cpus_active;
 RTE_DEFINE_PER_LCORE(unsigned int, cpu_numa_node);
 RTE_DEFINE_PER_LCORE(unsigned int, cpu_id);
 RTE_DEFINE_PER_LCORE(unsigned int, cpu_nr);
+RTE_DEFINE_PER_LCORE(unsigned int, queue_id); //DEBUGGG
 
 void *percpu_offsets[NCPU];
 
@@ -207,7 +208,6 @@ int cpu_init_one(unsigned int cpu)
 
 	RTE_PER_LCORE(cpu_id) = cpu;
 
-	RTE_PER_LCORE(cpu_numa_node) = numa_node;
 	log_is_early_boot = false;
 
 	log_info("cpu: started core %d, numa node %d\n", cpu, numa_node);

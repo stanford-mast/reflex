@@ -81,8 +81,11 @@
 #include <limits.h>
 
 #define DEFAULT_CONF_FILE "./ix.conf"
+#define SECONDARY_CONF_FILE "./ix-secondary.conf"
 
 struct cfg_parameters CFG;
+
+extern int PROCESS_SHOULD_BE_SECONDARY; //DEBUGGG
 
 extern int net_cfg(void);
 extern int arp_insert(struct ip_addr *addr, struct eth_addr *mac);
@@ -92,6 +95,8 @@ static config_t cfg_devmodel;
 static char config_file[256];
 static char devmodel_file[256];
 
+static int parse_queue_id(void); //DEBUGGG
+static int parse_num_process(void); //DEBUGGG
 static int parse_host_addr(void);
 static int parse_port(void);
 static int parse_gateway_addr(void);
@@ -128,6 +133,8 @@ static struct config_vector_t config_tbl[] = {
 	{ "batch",        parse_batch},
 	{ "loader_path",  parse_loader_path},
 	{ "scheduler", 	  parse_scheduler_mode},
+    { "num_process",  parse_num_process}, //DEBUGGG
+    { "queue_id",     parse_queue_id}, //DEBUGGG
 	{ NULL,           NULL}
 };
 
@@ -606,6 +613,7 @@ static int add_cpu(int cpu)
 	if (CFG.num_cpus >= CFG_MAX_CPU)
 		return -E2BIG;
 	CFG.cpu[CFG.num_cpus++] = (uint32_t)cpu;
+
 	return 0;
 }
 
@@ -647,6 +655,30 @@ static int parse_batch(void)
 	return 0;
 }
 
+static int parse_num_process(void)
+{
+	int num_process = 1;
+	config_lookup_int(&cfg, "num_process", &num_process);
+	if (!num_process || num_process <= 0) {
+		return -EINVAL;
+	}
+	CFG.num_process = num_process;
+	return 0;
+}
+
+static int parse_queue_id(void)
+{
+	int queue_id = -1;
+	config_lookup_int(&cfg, "queue_id", &queue_id);
+	if (queue_id < 0) {
+		return -EINVAL;
+	}
+    printf("DEBUGGG: QUEUE_ID: %d\n", queue_id);
+	CFG.queue_id = queue_id;
+    RTE_PER_LCORE(queue_id) = queue_id;
+	return 0;
+}
+
 static int parse_loader_path(void)
 {
 	char *parsed = NULL;
@@ -665,6 +697,8 @@ static int parse_conf_file(const char *path)
 	
 	for (i = 0; config_tbl[i].name; ++i) {
 		if (config_tbl[i].f) {
+            printf("$$$$$$$$$$function name: %s$$$$$$$$$$$$\n", config_tbl[i].name);
+
 			ret = config_tbl[i].f();
 			if (ret) {
 				log_err("error parsing parameter '%s'\n",
@@ -758,6 +792,7 @@ fail:
 	return ret;
 }
 
+
 /**
  * cfg_init - parses configuration arguments and files
  * @argc: the number of arguments
@@ -769,7 +804,14 @@ fail:
 int cfg_init(int argc, char *argv[], int *args_parsed)
 {
 	int ret;
-	sprintf(config_file, DEFAULT_CONF_FILE);
+    
+    if(PROCESS_SHOULD_BE_SECONDARY) {//rte_eal_process_type() == RTE_PROC_PRIMARY) {
+        printf("---DEBUGGG: PROCESS IS SECONDARY---\n"); 
+	    sprintf(config_file, SECONDARY_CONF_FILE);
+    } else {
+        printf("---DEBUGGG: PROCESS IS PRIMARY---\n");
+        sprintf(config_file, DEFAULT_CONF_FILE);
+    }
 
 	ret = parse_conf_file(config_file);
 	if (ret)
@@ -783,8 +825,16 @@ int cfg_init(int argc, char *argv[], int *args_parsed)
 int cfg_parse_cpu(int argc, char *argv[], int *args_parsed)
 {
 	int ret;
-	sprintf(config_file, DEFAULT_CONF_FILE);
-	/*
+	//sprintf(config_file, DEFAULT_CONF_FILE);
+	if(PROCESS_SHOULD_BE_SECONDARY) {//rte_eal_process_type() == RTE_PROC_PRIMARY) {
+        printf("---DEBUGGG: PROCESS IS SECONDARY---\n"); 
+	    sprintf(config_file, SECONDARY_CONF_FILE);
+    } else {
+        printf("---DEBUGGG: PROCESS IS PRIMARY---\n");
+        sprintf(config_file, DEFAULT_CONF_FILE);
+    }
+
+    /*
 	ret = parse_arguments(argc, argv, args_parsed);
 	if (ret)
 		return ret;

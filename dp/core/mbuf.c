@@ -110,7 +110,8 @@ int mbuf_init(void)
 	if (ret) {
 		assert(0);
 		//mempool_pagemem_destroy(m);
-		mempool_destroy_datastore(m);
+		printf("DEBUGGG: about to destroy datastore\n");
+        mempool_destroy_datastore(m);
 		return ret;
 	}
 	

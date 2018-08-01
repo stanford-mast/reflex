@@ -240,6 +240,7 @@ static int set_fdir_filter_on_accept(struct ip_tuple *id)
 
 long bsys_tcp_accept(hid_t handle, unsigned long cookie)
 {
+    printf("DEBUGGG: in bsys tcp accept\n");
 	/*
 	 * FIXME: this function is sort of a placeholder since we have no
 	 * choice but to have already accepted the connection under LWIP's
@@ -584,6 +585,8 @@ static err_t on_accept(struct eth_fg *cur_fg, void *arg, struct tcp_pcb *pcb, er
 	id->src_port = pcb->remote_port;
 	id->dst_port = pcb->local_port;
 	api->id = id;
+
+    printf("      DEBUGGG: about to call tcpapi_to_handle\n");
 	handle = tcpapi_to_handle(cur_fg, api);
 	api->handle = handle;
 
@@ -619,8 +622,10 @@ lwip_tcp_event(struct eth_fg *cur_fg, void *arg, struct tcp_pcb *pcb,
 	       u16_t size,
 	       err_t err)
 {
+    printf("***DEBUGGG: event: %d\n", event);
 	switch (event) {
 	case LWIP_EVENT_ACCEPT:
+        printf("DEBUGGG: in lwip tcp event inside the accept event\n");
 		return on_accept(cur_fg, arg, pcb, err);
 		break;
 	case LWIP_EVENT_SENT:
@@ -864,6 +869,7 @@ long bsys_tcp_connect(struct ip_tuple __user *id, unsigned long cookie)
 
 	tcp_arg(pcb, api);
 
+    printf("       DEBUGGG: about to call tcpapi_to_handle 2\n");
 	api->handle = tcpapi_to_handle(cur_fg, api);
 
 #if  LWIP_CALLBACK_API

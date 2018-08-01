@@ -151,6 +151,7 @@ static int bsys_dispatch_one(struct bsys_desc __user *d)
 		goto out;
 	}
 
+    //printf("DEBUGGG :Sysnr: %d\n", sysnr);
 	ret = bsys_tbl[sysnr](arga, argb, argc, argd, arge, argf);
 
 out:
@@ -247,6 +248,7 @@ again:
 	KSTATS_POP(NULL);
 
 	KSTATS_PUSH(rx_poll, NULL);
+    //printf("     DEBUGGG: CALLING ETH PROCESS POLL\n");
 	eth_process_poll();
 	KSTATS_POP(NULL);
 
@@ -257,6 +259,7 @@ again:
 	nvme_process_completions();
 
 	KSTATS_PUSH(tx_send, NULL);
+    //printf("     DEBUGGG: CALLING ETH PROCESS SEND\n");
 	eth_process_send();
 	KSTATS_POP(NULL);
 	return 0;

@@ -155,6 +155,7 @@ static struct pbuf *
 tcp_output_alloc_header(struct tcp_pcb *pcb, u16_t optlen, u16_t datalen,
                       u32_t seqno_be /* already in network byte order */)
 {
+    printf("{{{DEBUGGG: IN TCP_OUTPUT_ALLOC_HEADER}}}\n");
   struct tcp_hdr *tcphdr;
   struct pbuf *p = pbuf_alloc(PBUF_IP, TCP_HLEN + optlen + datalen, PBUF_RAM);
   if (p != NULL) {
@@ -787,6 +788,9 @@ memerr:
 err_t
 tcp_enqueue_flags(struct tcp_pcb *pcb, u8_t flags)
 {
+
+  printf("============DEBUGGG: IN TCP_ENQUEUE_FLAGS============\n");
+    
   struct pbuf *p;
   struct tcp_seg *seg;
   u8_t optflags = 0;
@@ -992,7 +996,8 @@ tcp_send_empty_ack(struct eth_fg *cur_fg,struct tcp_pcb *pcb)
 err_t
 tcp_output(struct eth_fg *cur_fg,struct tcp_pcb *pcb)
 {
-  struct tcp_seg *seg, *useg;
+  printf("{{{DEBUGGG: IN TCP_OUTPUT}}}\n");
+    struct tcp_seg *seg, *useg;
   u32_t wnd, snd_nxt;
 #if TCP_CWND_DEBUG
   s16_t i = 0;
@@ -1086,6 +1091,7 @@ tcp_output(struct eth_fg *cur_fg,struct tcp_pcb *pcb)
     pcb->unsent = seg->next;
 
     if (pcb->state != SYN_SENT) {
+        printf("<><><>DEBUGGG: CHANGING TO TCP_ACK<><><>\n");
       TCPH_SET_FLAG(seg->tcphdr, TCP_ACK);
       pcb->flags &= ~TF_ACK_NOW;
       pcb->timer_delayedack_expires = 0;
@@ -1318,6 +1324,7 @@ tcp_rst_impl(struct eth_fg *cur_fg,u32_t seqno, u32_t ackno,
 #endif /* LWIP_IPV6 */
   )
 {
+    printf("{{{DEBUGGG: IN TCP_RST_IMPL}}}\n");
   struct pbuf *p;
   struct tcp_hdr *tcphdr;
   p = pbuf_alloc(PBUF_IP, TCP_HLEN, PBUF_RAM);
@@ -1421,12 +1428,14 @@ tcp_rexmit(struct tcp_pcb *pcb)
   cur_seg = &(pcb->unsent);
   while (*cur_seg &&
     TCP_SEQ_LT(ntohl((*cur_seg)->tcphdr->seqno), ntohl(seg->tcphdr->seqno))) {
+      //printf("[][][]DEBUGGG IN CONDITIONAL LOOP while\n");
       cur_seg = &((*cur_seg)->next );
   }
   seg->next = *cur_seg;
   *cur_seg = seg;
 #if TCP_OVERSIZE
   if (seg->next == NULL) {
+      //printf("[][][]DEBUGGG IN CONDITIONAL LOOP IF\n");
     /* the retransmitted segment is last in unsent, so reset unsent_oversize */
     pcb->unsent_oversize = 0;
   }
@@ -1438,7 +1447,10 @@ tcp_rexmit(struct tcp_pcb *pcb)
   pcb->rttest = 0;
 
   /* Do the actual retransmission. */
+  printf("11111 DEBUGGG: IN tcp_rexmit with flags: %d\n", pcb->flags);
   snmp_inc_tcpretranssegs();
+  printf("22222 DEBUGGG: IN tcp_rexmit with flags: %d\n", pcb->flags);
+
   /* No need to call tcp_output: we are always called from tcp_input()
      and thus tcp_output directly returns. */
 }
@@ -1550,6 +1562,7 @@ tcp_keepalive(struct eth_fg *cur_fg,struct tcp_pcb *pcb)
 void
 tcp_zero_window_probe(struct eth_fg *cur_fg,struct tcp_pcb *pcb)
 {
+    printf("{{{DEBUGGG: IN TCP_ZERO_WINDOW_PROBE}}}\n");
 
   struct pbuf *p;
   struct tcp_hdr *tcphdr;
@@ -1588,6 +1601,7 @@ tcp_zero_window_probe(struct eth_fg *cur_fg,struct tcp_pcb *pcb)
 
   if (is_fin) {
     /* FIN segment, no data */
+    printf("DEBUGGG: SETTING FLAG TCP_ACK 2 !!!!!!!!!!!!!!!\n");
     TCPH_FLAGS_SET(tcphdr, TCP_ACK | TCP_FIN);
   } else {
     /* Data segment, copy in one byte from the head of the unacked queue */

@@ -88,7 +88,9 @@ int net_init(void)
 {
 	int ret;
 
+    //printf("DEBUGGG: about to call arp_init()\n");
 	ret = arp_init();
+    //printf("DEBUGGG: back from arp_init()\n");
 	if (ret) {
 		log_err("net: failed to initialize arp\n");
 		return ret;

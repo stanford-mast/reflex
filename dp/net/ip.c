@@ -132,6 +132,8 @@ static void ip_input(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct ip_hdr 
 	switch (hdr->proto) {
 	case IPPROTO_TCP:
 		/* FIXME: change when we integrate better with LWIP */
+        //printf("TCP packet received! cur_fg->cur_cpu: %d\n", cur_fg->cur_cpu);
+        printf("TCP packet received!\n");
 		tcp_input_tmp(cur_fg, pkt, hdr, mbuf_nextd_off(hdr, void *, hdrlen));
 		break;
 		break;

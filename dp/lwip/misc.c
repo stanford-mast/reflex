@@ -89,6 +89,7 @@ struct netif *ip_route(struct ip_addr *dest)
 
 void tcp_input_tmp(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct ip_hdr *iphdr, void *tcphdr)
 {
+    printf("DEBUGGG: in tcp input tmp\n");
 	struct pbuf *pbuf;
 
 	pbuf = pbuf_alloc(PBUF_RAW, ntoh16(iphdr->len) - iphdr->header_len * 4, PBUF_ROM);

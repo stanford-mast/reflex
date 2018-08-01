@@ -531,8 +531,15 @@ int arp_init(void)
 {
 	int ret;
 
+    //DEBUGGG start
+    if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+    	//NEW!
+	    spin_lock_init(&pending_pkt_lock);
+    }
+    //DEBUGGG end
+
 	//NEW!
-	spin_lock_init(&pending_pkt_lock);
+	//spin_lock_init(&pending_pkt_lock);
 
 	ret = mempool_create_datastore(&pending_pkt_datastore, MAX_PENDING_PKTS, sizeof(struct pending_pkt), "pending_pkt");
 	if (ret)
