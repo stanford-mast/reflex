@@ -85,7 +85,7 @@
 
 struct cfg_parameters CFG;
 
-extern int PROCESS_SHOULD_BE_SECONDARY; //DEBUGGG
+extern int PROCESS_SHOULD_BE_SECONDARY;
 
 extern int net_cfg(void);
 extern int arp_insert(struct ip_addr *addr, struct eth_addr *mac);
@@ -95,8 +95,8 @@ static config_t cfg_devmodel;
 static char config_file[256];
 static char devmodel_file[256];
 
-static int parse_queue_id(void); //DEBUGGG
-static int parse_num_process(void); //DEBUGGG
+static int parse_queue_id(void);
+static int parse_num_process(void);
 static int parse_host_addr(void);
 static int parse_port(void);
 static int parse_gateway_addr(void);
@@ -133,8 +133,8 @@ static struct config_vector_t config_tbl[] = {
 	{ "batch",        parse_batch},
 	{ "loader_path",  parse_loader_path},
 	{ "scheduler", 	  parse_scheduler_mode},
-    { "num_process",  parse_num_process}, //DEBUGGG
-    { "queue_id",     parse_queue_id}, //DEBUGGG
+    { "num_process",  parse_num_process},
+    { "queue_id",     parse_queue_id},
 	{ NULL,           NULL}
 };
 
@@ -175,92 +175,78 @@ static int str_to_ip_addr(const char *src, unsigned char *dst)
 	return 0;
 }
 
-
-//FIXME: FDIR setting not working for userspace version of ReFlex -- need to debug 
-//       this functionality is required for multi-core ReFlex deployment
-int parse_fdir(void)
+uint32_t convert_str_ip_to_uint32(const char *src, uint32_t *out) 
 {
-	const config_setting_t *fdir = NULL, *entry = NULL;
-	int i, ret;
+	uint32_t ip;
+	unsigned char a, b, c, d;
+	if (sscanf(src, "%hhu.%hhu.%hhu.%hhu", &a, &b, &c, &d) != 4) return -EINVAL;
+	ip = (a << 24) + (b << 16) + (c << 8) + (d);
+	memcpy(out, &ip, sizeof(uint32_t));
+	return 0;
+}
 
-	struct rte_eth_fdir_filter filter;
-
-	memset(&filter, 0, sizeof(struct rte_eth_fdir_filter));
-
+int parse_cfg_fdir_rules(uint8_t port_id) 
+{
+	int ret;
+	const config_setting_t *fdir = NULL;
+	const config_setting_t *entry = NULL;
+	
 	fdir = config_lookup(&cfg, "fdir");
 	if (!fdir) {
-		log_info("no static fdir rules defined in config\n");
+		printf("No FDIR rules defined in config\n");
 		return 0;
 	}
 	
-	ret = rte_eth_dev_filter_supported(active_eth_port, RTE_ETH_FILTER_FDIR);
-	if (ret < 0) {
-		log_err("ERROR: hardware does not support flow director.  \
-				Need to figure out alternative for steering traffic to specific \
-				cores in multi-core setup\n");
-	}
-
-/*
-	struct rte_eth_fdir_filter_info filter_info;
-	memset(&filter_info, 0, sizeof(filter_info));
-	filter_info.info_type = RTE_ETH_FDIR_FILTER_INPUT_SET_SELECT;
-	filter_info.info.input_set_conf.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_TCP;
-	filter_info.info.input_set_conf.inset_size = 2;
-	filter_info.info.input_set_conf.field[0]
-				= RTE_ETH_INPUT_SET_L3_DST_IP4;
-	filter_info.info.input_set_conf.field[1]
-				= RTE_ETH_INPUT_SET_L4_TCP_DST_PORT;
-	filter_info.info.input_set_conf.op = RTE_ETH_INPUT_SET_SELECT;
-	ret = rte_eth_dev_filter_ctrl(0, RTE_ETH_FILTER_FDIR,
-			RTE_ETH_FILTER_SET, &filter_info);
-	if (ret != 0) {
-		rte_exit(EXIT_FAILURE, "Could not set fdir info: %s\n",
-				strerror(-ret));
-	}
-*/
-	for (i = 0; i < config_setting_length(fdir); ++i) {
-		const char *dst_ip = NULL, *src_ip = NULL;
-		int dst_port = 0;
-		int queue_id = 0;
-		struct ip_addr dst_ipaddr;
-		struct ip_addr src_ipaddr;
+	for (int i = 0; i < config_setting_length(fdir); i++) {
 		entry = config_setting_get_elem(fdir, i);
-		config_setting_lookup_string(entry, "dst_ip", &dst_ip);
-		config_setting_lookup_string(entry, "src_ip", &src_ip);
+		
+		// Parse destination IP address.
+		const char *dst_ip_str = NULL;
+		uint32_t dst_ip;
+		config_setting_lookup_string(entry, "dst_ip", &dst_ip_str);
+		if (!dst_ip_str) return -EINVAL;
+		if (convert_str_ip_to_uint32(dst_ip_str, &dst_ip)) return -EINVAL;
+		printf("\tdst_ip = %lu, ", dst_ip);
+		
+		// Parse source IP address.
+		const char *src_ip_str = NULL;
+		uint32_t src_ip;
+		config_setting_lookup_string(entry, "src_ip", &src_ip_str);
+		if (!src_ip_str) return -EINVAL;
+		if (convert_str_ip_to_uint32(src_ip_str, &src_ip)) return -EINVAL;
+		printf("\tsrc_ip = %lu, ", src_ip); 
+		
+		// Parse destination port.
+		uint16_t dst_port;
 		config_setting_lookup_int(entry, "dst_port", &dst_port);
-		config_setting_lookup_int(entry, "queue", &queue_id);
-		if ( !dst_ip || !src_ip || !dst_port )
-			return -EINVAL;
-		if (str_to_ip_addr(dst_ip, (void *)&dst_ipaddr))
-			return -EINVAL;
-		if (str_to_ip_addr(src_ip, (void *)&src_ipaddr))
-			return -EINVAL;
-		//ret = ixgbe_fdir_add_rule(dst_ipaddr.addr, src_ipaddr.addr, dst_port, queue_id);
+		if (!dst_port) return -EINVAL;
+		printf("\tdst_port = %u --> ", dst_port);
+
+		// Parse queue number.
+		uint16_t queue;                                    // Technically queue should be uint8_t, but calling
+		config_setting_lookup_int(entry, "queue", &queue); // config_setting_lookup_int on that overwrites stack.
+		printf("\tqueue %u\n", queue);
 		
+		uint8_t drop = 0; // Currently hardcoded to zero, adding drop field/rules in cfg would be possible.
+		uint8_t soft_id = i;
+
+		// Create filter struct.
+		struct rte_eth_fdir_filter filter;
+		memset(&filter, 0, sizeof(filter));
+		filter.soft_id = soft_id;
 		filter.input.flow_type = RTE_ETH_FLOW_NONFRAG_IPV4_TCP;
-		filter.input.flow.tcp4_flow.ip.src_ip = hton32(src_ipaddr.addr); 
-		filter.input.flow.tcp4_flow.ip.dst_ip = hton32(dst_ipaddr.addr); // tos, ttl?
-		filter.input.flow.tcp4_flow.src_port = 0; 
+		filter.input.flow.tcp4_flow.ip.src_ip = hton32(src_ip);
+		filter.input.flow.tcp4_flow.ip.dst_ip = hton32(dst_ip);
+		filter.input.flow.tcp4_flow.src_port = hton16(0);
 		filter.input.flow.tcp4_flow.dst_port = hton16(dst_port);
-		filter.soft_id = 0;
-		filter.action.rx_queue = queue_id; 
-		filter.action.behavior = RTE_ETH_FDIR_ACCEPT; 
+		filter.action.rx_queue = queue;
+		filter.action.behavior = drop ? RTE_ETH_FDIR_REJECT : RTE_ETH_FDIR_ACCEPT;
 		filter.action.report_status = RTE_ETH_FDIR_REPORT_ID;
-		
-		ret = rte_eth_dev_filter_ctrl(active_eth_port, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, &filter);
-		if (ret < 0) {
-			log_err("cfg: failed to add FDIR rule, ret %d.\n", ret);
-			return ret;
-		}
-		log_info("FDIR: dst_ip %s, src_ip %s, dst_port %d --> queue (core) %d\n", 
-				 dst_ip, src_ip, dst_port, queue_id);
+
+		// Apply filter struct.
+		ret = rte_eth_dev_filter_ctrl(port_id, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_ADD, (void *)&filter);
+		if (ret < 0) return ret;
 	}
-
-	struct rte_eth_fdir_stats stats;
-	ret = rte_eth_dev_filter_ctrl(active_eth_port, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_STATS, &stats);
-	printf("FDIR stats: collision %d, free %d, add %d, f_add %d\n", stats.collision, stats.free, stats.add, stats.f_add);
-
-	config_destroy(&cfg); //moved this here
 	return 0;
 }
 
@@ -673,7 +659,6 @@ static int parse_queue_id(void)
 	if (queue_id < 0) {
 		return -EINVAL;
 	}
-    printf("DEBUGGG: QUEUE_ID: %d\n", queue_id);
 	CFG.queue_id = queue_id;
     RTE_PER_LCORE(queue_id) = queue_id;
 	return 0;
@@ -806,10 +791,8 @@ int cfg_init(int argc, char *argv[], int *args_parsed)
 	int ret;
     
     if(PROCESS_SHOULD_BE_SECONDARY) {//rte_eal_process_type() == RTE_PROC_PRIMARY) {
-        printf("---DEBUGGG: PROCESS IS SECONDARY---\n"); 
 	    sprintf(config_file, SECONDARY_CONF_FILE);
     } else {
-        printf("---DEBUGGG: PROCESS IS PRIMARY---\n");
         sprintf(config_file, DEFAULT_CONF_FILE);
     }
 
@@ -827,10 +810,8 @@ int cfg_parse_cpu(int argc, char *argv[], int *args_parsed)
 	int ret;
 	//sprintf(config_file, DEFAULT_CONF_FILE);
 	if(PROCESS_SHOULD_BE_SECONDARY) {//rte_eal_process_type() == RTE_PROC_PRIMARY) {
-        printf("---DEBUGGG: PROCESS IS SECONDARY---\n"); 
 	    sprintf(config_file, SECONDARY_CONF_FILE);
     } else {
-        printf("---DEBUGGG: PROCESS IS PRIMARY---\n");
         sprintf(config_file, DEFAULT_CONF_FILE);
     }
 

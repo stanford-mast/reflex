@@ -90,10 +90,10 @@ struct cfg_parameters {
 
 	struct eth_addr mac;
 
-    int num_process; //DEBUGGG
+    int num_process; 
 	int num_cpus;
 
-    int queue_id; //DEBUGGG
+    int queue_id;
 
 	unsigned int cpu[CFG_MAX_CPU];
 

@@ -217,7 +217,6 @@ static __thread struct mempool pp_conn_pool;
 
 static int parse_ip_addr(const char *str, uint32_t *addr)
 {
-    //printf("DEBUGGG: parsing ip addr\n");
     unsigned char a, b, c, d;
 
 	if (sscanf(str, "%hhu.%hhu.%hhu.%hhu", &a, &b, &c, &d) != 4)
@@ -236,7 +235,6 @@ static void receive_req(struct pp_conn *conn)
 	int measure_cond, report_cond, terminate_cond; 
 	
 	while(1) {
-        //printf("DEBUGGG: beginning of while\n");
         if(!conn->rx_pending) {
 			ret = ixev_recv(&conn->ctx, &conn->data[conn->rx_received],
 					sizeof(BINARY_HEADER) - conn->rx_received); 
@@ -247,7 +245,6 @@ static void receive_req(struct pp_conn *conn)
 						ixev_close(&conn->ctx);
 					}
 				}
-                //printf("DEBUGGG: break\n");
 				break;
 			}
 			else
@@ -401,7 +398,6 @@ static void receive_req(struct pp_conn *conn)
  */
 int send_client_req(struct nvme_req *req) 
 {
-    //printf("DEBUGGG: send_client_req\n");
 	struct pp_conn *conn = req->conn;
 	int ret = 0;
 	BINARY_HEADER *header;

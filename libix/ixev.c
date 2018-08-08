@@ -870,7 +870,6 @@ static void ixev_handle_one_ret(struct bsys_ret *r)
  */
 void ixev_wait(void)
 {
-	//printf("DEBUGGG: IN IXEV_WAIT\n");
     int i;
 
 	/*

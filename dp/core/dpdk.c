@@ -82,7 +82,6 @@
 #include <math.h>
 
 struct rte_mempool *dpdk_pool;
-//extern bool PROCESS_SHOULD_BE_SECONDARY; //DEBUGGG
 
 #define MEMPOOL_CACHE_SIZE 256
 #define DPDK_MBUF_LENGTH 9000 + RTE_PKTMBUF_HEADROOM
@@ -93,7 +92,7 @@ int dpdk_init(void)
         
 	spdk_env_opts_init(&opts);
         opts.name = "reflex";
-        opts.shm_id = 1; //DEBUGGG	
+        opts.shm_id = 1;	
 
 
     //if(PROCESS_SHOULD_BE_SECONDARY) {
@@ -106,9 +105,7 @@ int dpdk_init(void)
 	char mask[3];
 	sprintf(mask, "%x", core_num);
 	opts.core_mask = mask;
-    //printf("DEBUGGG: ABOUT TO CALL SPDK_ENV_INIT\n");   
         spdk_env_init(&opts);	
-    //printf("DEBUGGG: JUST CALLED SPDK_ENV_INIT\n");
     
     /* pool_size sets an implicit limit on cores * NICs that DPDK allows */
 	const int pool_size = 32768;
@@ -116,14 +113,11 @@ int dpdk_init(void)
 	//dpdk_pool = rte_pktmbuf_pool_create("mempool", pool_size, MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
     
     if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
-        printf("DEBUGGG: is primary\n");
         dpdk_pool = rte_pktmbuf_pool_create("mempool", pool_size, MEMPOOL_CACHE_SIZE, 0, DPDK_MBUF_LENGTH, rte_socket_id());
     } else {
-        printf("DEBUGGG: is secondary\n");
         dpdk_pool = rte_mempool_lookup("mempool");
     }
 
-    printf("DEBUGGG: name: %s, flags: %d, size: %d\n", dpdk_pool->name, dpdk_pool->flags, dpdk_pool->size);
 
 	if (dpdk_pool == NULL)
 		panic("Cannot create DPDK pool\n");

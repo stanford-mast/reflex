@@ -132,14 +132,19 @@ int eth_process_poll(void)
 	 */
     do {
 		empty = true;
+
+		// This loops over each queue of a single core (current behaviour is 1 queue to 1 core)
+		// Note that i is the index within a core's list of queues, not the global list of queues.
 		for (i = 0; i < percpu_get(eth_num_queues); i++) {
             int queue_id = percpu_get(queue_id);
-			ret = rte_eth_rx_burst(active_eth_port, queue_id, &rx_pkts[queue_id], 1); //burst 1 because check queues round-robin 
+			ret = rte_eth_rx_burst(active_eth_port, queue_id, &rx_pkts[queue_id], 1); //burst 1 because check queues round-robin
+            //printf("ret: %d\n", ret);
 			if (ret) {
 				empty = false;
-				m = rx_pkts[queue_id]; //DEBUGGG
+				m = rx_pkts[queue_id];
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *)); 
-				eth_input_process(rx_pkts[queue_id], ret); //DEBUGGG
+
+				eth_input_process(rx_pkts[queue_id], ret);
 			
 #ifdef PRINT_RTE_STATS	
 				struct rte_eth_stats stats;	
@@ -209,8 +214,8 @@ int eth_process_recv(void)
 	do {
 		empty = true;
 		for (i = 0; i < percpu_get(eth_num_queues); i++) {
-            int queue_id = percpu_get(queue_id); //DEBUGGG
-			struct eth_rx_queue *rxq = percpu_get(eth_rxqs[queue_id]); //DEBUGGG
+            int queue_id = percpu_get(queue_id);
+			struct eth_rx_queue *rxq = percpu_get(eth_rxqs[queue_id]);
 			struct mbuf *pos = rxq->head;
 			if (pos)
 				min_timestamp = min(min_timestamp, pos->timestamp);
@@ -223,8 +228,8 @@ int eth_process_recv(void)
 
 	backlog = 0;
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-        int queue_id = percpu_get(queue_id); //DEBUGGG
-		backlog += percpu_get(eth_rxqs[queue_id])->len; //DEBUGGG
+        int queue_id = percpu_get(queue_id);
+		backlog += percpu_get(eth_rxqs[queue_id])->len;
     }
 
 	timestamp = rdtsc();
@@ -319,6 +324,11 @@ int ethdev_init_cpu(void)
 		exit(0);
 	}
 	percpu_get(tx_buf) = tx_buffer;
+
+	// Assign each CPU the correct number of queues.
+	percpu_get(eth_num_queues) = rte_eth_dev_count();
+
+	return 0;
 }
 
 
@@ -331,10 +341,10 @@ void eth_process_send(void)
 	int i, nr;
 	struct eth_tx_queue *txq;
 
-
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-        int queue_id = percpu_get(queue_id); //DEBUGGG
-		rte_eth_tx_buffer_flush(active_eth_port, queue_id, percpu_get(tx_buf)); //DEBUGGG changed i to queue_id
+        int queue_id = percpu_get(queue_id);
+		rte_eth_tx_buffer_flush(active_eth_port, queue_id, percpu_get(tx_buf));
+		// NOTE: rte_eth_tx_buffer_flush appears to flush all queues regardless of the parameter given.
 	}
 
 
@@ -349,8 +359,8 @@ void eth_process_reclaim(void)
 	struct eth_tx_queue *txq;
 
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-        int queue_id = percpu_get(queue_id); //DEBUGGG
-		txq = percpu_get(eth_txqs[queue_id]); //DEBUGGG
+        int queue_id = percpu_get(queue_id); 
+		txq = percpu_get(eth_txqs[queue_id]);
 		txq->cap = eth_tx_reclaim(txq);
 	}
 }

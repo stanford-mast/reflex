@@ -168,9 +168,9 @@ static struct rte_eth_conf default_eth_conf = {
 		.header_split   = 0, /**< Header Split disabled */
 		.hw_ip_checksum = 1, /**< IP checksum offload disabled */
 		.hw_vlan_filter = 0, /**< VLAN filtering disabled */
-		.jumbo_frame    = 1, /**< Jumbo Frame Support disabled */
+		.jumbo_frame	= 1, /**< Jumbo Frame Support disabled */
 		.hw_strip_crc   = 1, /**< CRC stripped by hardware */
-		.mq_mode        = ETH_MQ_RX_RSS,
+		.mq_mode		= ETH_MQ_RX_RSS,
 	},
 	.rx_adv_conf = {
 		.rss_conf = {
@@ -183,89 +183,89 @@ static struct rte_eth_conf default_eth_conf = {
 	.fdir_conf = {
 		.mode = RTE_FDIR_MODE_PERFECT, 
 		.pballoc = RTE_FDIR_PBALLOC_256K,
+		.mask = {
+			.vlan_tci_mask = 0x0,
+			.ipv4_mask = {
+				.src_ip = 0xFFFFFFFF,
+				.dst_ip = 0xFFFFFFFF,
+			},
+			.src_port_mask = 0,
+			.dst_port_mask = 0xFFFF,
+			.mac_addr_byte_mask = 0,
+			.tunnel_type_mask = 0,
+			.tunnel_id_mask = 0,
+		},
+		.drop_queue = 127,
+		.flex_conf = {
+			.nb_payloads = 0,
+			.nb_flexmasks = 0,
+		},
 	},
 };
 
 /**
- * init_ethdev - initializes an ethernet device
- *
- * Returns 0 if successful, otherwise fail.
+ * add_fdir_fules
+ * Sets up flow director to direct incoming packets.
  */
-static int init_ethdev(void)
+int add_fdir_rules(uint8_t port_id)
 {
     int ret;
-	int i;
+	log_info("Adding FDIR rules.\n");
 
-	// DPDK init for pci ethdev already done in dpdk_init()
-	uint8_t port_id;
+	// Check that flow director is supported.
+	if (ret = rte_eth_dev_filter_supported(port_id, RTE_ETH_FILTER_FDIR)) {
+		log_err("This device does not support Flow Director (Error %d).\n", ret);
+		return -ENOTSUP;
+	}
 
-	// Allocate 1 RX and 1 TX queue per CPU core
-	uint16_t nb_rx_q = CFG.num_cpus; //DEBUGGG
-	uint16_t nb_tx_q = CFG.num_cpus; //DEBUGGG
+	// Flush any existing flow director rules.
+	ret = rte_eth_dev_filter_ctrl(port_id, RTE_ETH_FILTER_FDIR, RTE_ETH_FILTER_FLUSH, NULL);
+	if (ret < 0) {
+		log_err("Could not flush FDIR entries.\n");
+		return -1;
+	}
+
+	// Add flow director rules (currently added from static config file in cfg.c).
+	ret = parse_cfg_fdir_rules(port_id);
+
+	return ret;
+}
+
+/**
+ * init_port
+ * Sets up the ethernet port on a given port id.
+ */
+static void init_port(uint8_t port_id, struct eth_addr *mac_addr)
+{
+	int ret;
+    int i;
+
+	uint16_t nb_rx_q = CFG.num_cpus; 
+	uint16_t nb_tx_q = CFG.num_cpus;
 	struct rte_eth_conf *dev_conf; 
 
 	dev_conf = &default_eth_conf;
 
-	uint8_t nb_ports;
 	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; //1024
 	uint16_t nb_rx_desc = ETH_DEV_RX_QUEUE_SZ; //512
 	struct rte_eth_dev_info dev_info;
-	struct rte_eth_txconf* txconf; 
+	struct rte_eth_txconf* txconf;
 	struct rte_eth_rxconf* rxconf; 
-	struct ether_addr mac_addr;
 	uint16_t mtu;
-
-    //if(rte_eal_process_type() == RTE_PROC_SECONDARY) { //DEBUGGG
-    //    percpu_get(eth_num_queues) = 1;
-    //    return 0;
-    //}
-
-	nb_ports = rte_eth_dev_count();
-	if (nb_ports == 0)
-		rte_exit(EXIT_FAILURE, "No Ethernet ports - exiting\n");
-
-	if (nb_ports > 1)
-		printf("WARNING: only 1 ethernet port is used\n");
-
-	if (nb_ports > RTE_MAX_ETHPORTS)
-		nb_ports = RTE_MAX_ETHPORTS;
-
-	//printf("DEBUGGG: checkpoint 1\n");
-    //FIXME: figure out device config for fdir....
-	dev_conf->fdir_conf.mode = RTE_FDIR_MODE_PERFECT;
-	dev_conf->fdir_conf.pballoc = RTE_FDIR_PBALLOC_256K;
-	dev_conf->fdir_conf.status = RTE_FDIR_REPORT_STATUS;
-
-	dev_conf->fdir_conf.mask.vlan_tci_mask = 0x0;
-	dev_conf->fdir_conf.mask.ipv4_mask.src_ip = 0xFFFFFFFF;
-	dev_conf->fdir_conf.mask.ipv4_mask.dst_ip = 0xFFFFFFFF;
-	dev_conf->fdir_conf.mask.src_port_mask = 0; //don't take into account src_port
-	dev_conf->fdir_conf.mask.dst_port_mask = 0xFFFF;
-
-	dev_conf->fdir_conf.mask.mac_addr_byte_mask = 0;
-	dev_conf->fdir_conf.mask.tunnel_type_mask = 0;
-	dev_conf->fdir_conf.mask.tunnel_id_mask = 0;
-	dev_conf->fdir_conf.drop_queue = 127;
-	dev_conf->fdir_conf.flex_conf.nb_payloads = 0;
-	dev_conf->fdir_conf.flex_conf.nb_flexmasks = 0;
-
-    //printf("DEBUGGG: nb_ports: %d\n", nb_ports);
-	for (port_id = 0; port_id < nb_ports; port_id++) {		
-
-		if (dev_conf->rxmode.jumbo_frame) {
-			dev_conf->rxmode.max_rx_pkt_len = 9000 + ETHER_HDR_LEN + ETHER_CRC_LEN;
-		}
-
-        if(rte_eal_process_type() == RTE_PROC_PRIMARY) { //DEBUGGG
-            ret = rte_eth_dev_configure(port_id, nb_rx_q * CFG.num_process, nb_tx_q * CFG.num_process, dev_conf); //DEBUGGG added the CFG.num_process *
-            if (ret < 0) {
-			    rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
+		
+	if (dev_conf->rxmode.jumbo_frame) {
+		dev_conf->rxmode.max_rx_pkt_len = 9000 + ETHER_HDR_LEN + ETHER_CRC_LEN;
+	}
+    if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
+        ret = rte_eth_dev_configure(port_id, nb_rx_q * CFG.num_process, nb_tx_q * CFG.num_process, dev_conf);
+        if (ret < 0) {
+			rte_exit(EXIT_FAILURE, "rte_eth_dev_configure:err=%d, port=%u\n",
 			    			 ret, (unsigned) port_id);
-		    }
-        }
+		}
+    }
 
-		rte_eth_dev_info_get(port_id, &dev_info);
-		txconf = &dev_info.default_txconf;  //FIXME: this should go here but causes TCP rx bug
+    rte_eth_dev_info_get(port_id, &dev_info);
+	txconf = &dev_info.default_txconf;  //FIXME: this should go here but causes TCP rx bug
 		rxconf = &dev_info.default_rxconf;
 				
 		if (dev_conf->rxmode.jumbo_frame) {
@@ -279,32 +279,30 @@ static int init_ethdev(void)
 			txconf->txq_flags = 0; 
 		}
 
-        printf("===DEBUGGG: num CPU: %d\n", CFG.num_cpus);
+
 		// initialize one queue per cpu
-        if(rte_eal_process_type() == RTE_PROC_PRIMARY) { //DEBUGGG
+        if(rte_eal_process_type() == RTE_PROC_PRIMARY) {
 
-		    for (i = 0; i < CFG.num_cpus * CFG.num_process; i++) { //DEBUGGG
-		    //for (i = 0; i < CFG.num_cpus; i++) { //DEBUGGG
+		    for (i = 0; i < CFG.num_cpus * CFG.num_process; i++) {
                 
-                //for (i = 0; i < 2; i++) { //DEBUGGG
 		    	log_info("setting up TX and RX queues...\n");
-		        printf("DEBUGGG: calling PRIMARY rte_eth_tx_queue_setup with: %d, %d, %d, %d\n", port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id));
 
-                ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), txconf); //DEBUGGG i->0
+                ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), txconf);
 		    	if (ret < 0) {
 		    		rte_exit(EXIT_FAILURE, "rte_eth_tx_queue_setup:err=%d, port=%u\n",
 		    				 ret, (unsigned) port_id);
 		    	}
-                printf("DEBUGGG: calling PRIMARY rte_eth_rx_queue_setup with: %d, %d, %d, %d\n", port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id));
 
-		    	rte_eth_rx_queue_setup(port_id, i, nb_rx_desc, rte_eth_dev_socket_id(port_id), rxconf, dpdk_pool); //DEBUGGG i->0
+		    	rte_eth_rx_queue_setup(port_id, i, nb_rx_desc, rte_eth_dev_socket_id(port_id), rxconf, dpdk_pool);
 		    	if (ret <0 ) {
 		    		rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
 		    				 ret, (unsigned) port_id);
 		    	}
-		    } //DEBUGGG
+		    }
         }
-		
+
+		rte_eth_promiscuous_enable(port_id);
+
         ret = rte_eth_dev_start(port_id);
 		if (ret < 0) {
 			printf("ERROR starting device at port %d\n", port_id);
@@ -317,34 +315,60 @@ static int init_ethdev(void)
 		struct rte_eth_link	link;
 		rte_eth_link_get(port_id, &link);
 
-		if (!link.link_status) {
-			log_warn("eth:\tlink appears to be down, check connection.\n");
-		} else {
-			printf("eth:\tlink up - speed %u Mbps, %s\n",
-				   (uint32_t) link.link_speed,
-				   (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
-				   ("full-duplex") : ("half-duplex\n"));
-			rte_eth_macaddr_get(port_id, &mac_addr);
-			active_eth_port = port_id;
-		}
 
-		rte_eth_promiscuous_enable(port_id);
-        printf("DEBUGGG: checkpoint %d\n", port_id + 2);
 
+	    if (!link.link_status) {
+		    log_warn("eth:\tlink appears to be down, check connection.\n");
+	    } else {
+		    printf("eth:\tlink up - speed %u Mbps, %s\n",
+			   (uint32_t) link.link_speed,
+			   (link.link_duplex == ETH_LINK_FULL_DUPLEX) ?
+			   ("full-duplex") : ("half-duplex"));
+		    rte_eth_macaddr_get(port_id, mac_addr);
+		    active_eth_port = port_id;
+	    }
+}
+
+
+/**
+ * init_ethdev - initializes an ethernet device
+ *
+ * Returns 0 if successful, otherwise fail.
+ */
+static int init_ethdev(void)
+{
+	int ret;
+
+	// DPDK init for pci ethdev already done in dpdk_init()
+	uint8_t port_id;
+	uint8_t nb_ports;
+	struct ether_addr mac_addr;
+
+	nb_ports = rte_eth_dev_count();
+	if (nb_ports == 0) rte_exit(EXIT_FAILURE, "No Ethernet ports - exiting\n");
+	if (nb_ports > 1) printf("WARNING: only 1 ethernet port is used\n");
+	if (nb_ports > RTE_MAX_ETHPORTS) nb_ports = RTE_MAX_ETHPORTS;
+	
+	for (port_id = 0; port_id < nb_ports; port_id++) {
+		init_port(port_id, &mac_addr);
+		log_info("Ethdev on port %d initialised.\n", port_id);
+	    if(rte_eal_process_type() == RTE_PROC_PRIMARY) {	
+		    ret = add_fdir_rules(port_id);
+
+		    if (ret) {
+		    	log_err("Adding FDIR rules failed. (Error %d)\n", ret);
+		    } else {
+		    	log_info("All FDIR rules added.\n");
+		    }	
+        }
 	}
 	
 	struct eth_addr* macaddr = &mac_addr;
 	CFG.mac = *macaddr;
+	//percpu_get(eth_num_queues) = CFG.num_cpus; //NOTE: assume num tx queues == num rx queues
+	percpu_get(eth_num_queues) = nb_ports;
 
-	percpu_get(eth_num_queues) = nb_rx_q; //NOTE: assume num tx queues == num rx queues
-	parse_fdir();
-
-
-	return 0;
-
-err:
-
-	return ret;
+    return 0;
 }
 
 /**
@@ -442,7 +466,6 @@ static int init_fg_cpu(void)
 
 	bitmap_init(fg_bitmap, ETH_MAX_TOTAL_FG, 0);
 
-    printf("++++++++++++     DEBUGGG: start: %d, nr_flow_grpups: %d      +++++++++++++\n", start, nr_flow_groups);
 
 
 	for (fg_id = start; fg_id < nr_flow_groups; fg_id += CFG.num_cpus)
@@ -450,7 +473,6 @@ static int init_fg_cpu(void)
 
 	eth_fg_assign_to_cpu(fg_bitmap, RTE_PER_LCORE(cpu_nr));
     
-    printf("++++++++++++     DEBUGGG 2: start: %d, nr_flow_grpups: %d      +++++++++++++\n", start, nr_flow_groups);
 
 	for (fg_id = start; fg_id < nr_flow_groups; fg_id += CFG.num_cpus) {
 		eth_fg_set_current(fgs[fg_id]);
@@ -467,12 +489,11 @@ static int init_fg_cpu(void)
 		timer_init_fg();
 	}
 
-    //printf("DEBUGGG: init_fg_cpu checkpoint 2\n");
 
 	unset_current_fg();
 
 	//FIXME: figure out flow group stuff, this is temp fix for fg_id == cpu_id (no migration)
-	fg_id = percpu_get(cpu_id); //DEBUGGG 
+	fg_id = percpu_get(cpu_id);
 	//fg_id = outbound_fg_idx();
 	fgs[fg_id] = malloc(sizeof(struct eth_fg));
 	fgs[fg_id] = malloc(sizeof(struct eth_fg));
@@ -484,7 +505,6 @@ static int init_fg_cpu(void)
 	//fgs[fg_id]->eth = percpu_get(eth_rxqs[0])->dev;
 	tcp_init(fgs[fg_id]);
 
-    //printf("DEBUGGG: init_fg_cpu checkpoint 3\n");
 
 	return 0;
 }
@@ -542,7 +562,7 @@ static int init_hw(void)
 	int i, ret = 0;
 	pthread_t tid;
 	int j;
-	int fg_id; //DEBUGGG
+	int fg_id;
 
 	// will spawn per-cpu initialization sequence on CPU0
 	ret = init_create_cpu(CFG.cpu[0], 1);
@@ -676,54 +696,24 @@ int main(int argc, char *argv[])
 
 	log_info("init: starting IX\n");
 
-    //DEBUGGG
     if(strcmp(argv[1], "secondary") == 0) {
         PROCESS_SHOULD_BE_SECONDARY = true;
     }
 
-    //DEBUGGG start
-    //printf("DEBUGGG: argv[1]: %s\n", argv[1]);
-    //if(strcmp(argv[1], "secondary") == 0) {
-    //        printf("DEBUGGG: in if statement\n");
-    //        PROCESS_SHOULD_BE_SECONDARY = true;
-    //}
-    //DEBUGGG end
-
-
 	log_info("init: cpu phase\n");
 	for (i = 0; init_tbl[i].name; i++)
 		if (init_tbl[i].f) {
-            printf("DEBUGGG: about to call a function: %s\n", init_tbl[i].name);
 			ret = init_tbl[i].f();
 			log_info("init: module %-10s %s\n", init_tbl[i].name, (ret ? "FAILURE" : "SUCCESS"));
 			if (ret)
 				panic("could not initialize IX\n");
 	}
 
-    printf("---DEBUGGG: DONE WITH INITS---\n");
-
-    //DEBUGGG start
-    //int primary = -1;
-    //if(argc == 2) {
-    //    primary = atoi(argv[1]);
-        //printf("DEBUGGG: num instances: %d\n", num_instances);
-    //}
-    //if(num_instances > 1) {
-        //TODO: manage various instances of Reflex
-    //}
-    //DEBUGGG end
-    //printf("DEBUGGG: arg parsed: %d\n", args_parsed);
-
-	//ret = echoserver_main(argc - args_parsed, &argv[args_parsed]);
-	if (argc > 2) { //DEBUGGG changed 1 to 2
+	
+	if (argc > 2) { 
 		ret = reflex_client_main(argc - args_parsed, &argv[args_parsed]);
-    } else {//if (argc == 2) { //DEBUGGG made it an else if not just else
-        //printf("DEBUGGG: starting server \n");
-        //if(primary == 1) {
+    } else {
 		    ret = reflex_server_main(argc - args_parsed, &argv[args_parsed]);
-        //} else {
-            //TODO: manage secondary processes
-        //}
     }
 	if (ret) {
 		//log_err("init: failed to start echoserver\n");

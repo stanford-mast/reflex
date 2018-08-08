@@ -619,7 +619,7 @@ void *pp_main(void *arg)
 {
 	int ret;
 	conn_opened = 0;
-	printf("pp_main on cpu %d, thread self is %x\n", percpu_get(cpu_nr),pthread_self());
+	printf("pp_main on cpu %d, thread self is %x\n", percpu_get(cpu_nr), pthread_self());
 	struct launch_req *req;
 
 	ret = ixev_init_thread();
@@ -649,9 +649,7 @@ void *pp_main(void *arg)
 	}
 
 	ixev_nvme_open(NAMESPACE, 1);
-    //int count = 1; //DEBUGGG
 	while (1) {
-		//printf("DEBUGGG: IN WHILE: %d\n", count++);
         ixev_wait();
 	}
 
@@ -674,7 +672,6 @@ int reflex_server_main(int argc, char *argv[])
 	ret = mempool_create_datastore(&nvme_req_datastore, 
 				       outstanding_reqs,
 				       sizeof(struct nvme_req), "nvme_req_datastore");
-    //printf("DEBUGGG: reflex_server_main checkpoint 1\n");
 
 	if (ret) {
 		fprintf(stderr, "unable to create datastore\n");
@@ -683,7 +680,6 @@ int reflex_server_main(int argc, char *argv[])
 	
 	pp_conn_pool_entries = ROUND_UP(16 * 4096, MEMPOOL_DEFAULT_CHUNKSIZE);
 
-    //printf("DEBUGGG: reflex_server_main checkpoints 2\n");
 
 	ixev_init_conn_nvme(&pp_conn_ops, &nvme_ops);
 	if (ret) {
@@ -691,7 +687,6 @@ int reflex_server_main(int argc, char *argv[])
 		return ret;
 	}
 
-    //printf("DEBUGGG: reflex_server_main checkpoint 3\n");
 
 	ret = mempool_create_datastore(&pp_conn_datastore, pp_conn_pool_entries, sizeof(struct pp_conn), "pp_conn");
 	if (ret) {
@@ -699,7 +694,6 @@ int reflex_server_main(int argc, char *argv[])
 		return ret;
 	}
 	
-    //printf("DEBUGGG: reflex_server_main checkpoint 4\n");
 
 	ret = mempool_create_datastore_align(&nvme_req_buf_datastore, 
 				       outstanding_req_bufs,
@@ -710,7 +704,6 @@ int reflex_server_main(int argc, char *argv[])
 		return ret;
 	}
 
-    //printf("DEBUGGG: reflex_server_main checkpoint 5\n");
 
 	for (i = 1; i < nr_cpu; i++) {
 		//ret = pthread_create(&tid, NULL, start_cpu, (void *)(unsigned long) i);

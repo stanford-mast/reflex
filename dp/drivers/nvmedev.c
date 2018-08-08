@@ -46,7 +46,7 @@
 
 static struct spdk_nvme_ctrlr *nvme_ctrlr = NULL;
 static long global_ns_id = 1;
-static long global_ns_size = 2; //DEBUGGG changed from 1 to 2
+static long global_ns_size = 1;
 static long global_ns_sector_size = 1;
 struct pci_dev *g_nvme_dev;
 
@@ -248,10 +248,8 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 	const struct spdk_nvme_ctrlr_data *cdata;
 	struct spdk_nvme_ns *ns = spdk_nvme_ctrlr_get_ns(ctrlr, 1);
 	
-    //printf("DEBUGGG: after: nvme_ctrl: num_ns: %d\n", nvme_ctrlr->num_ns);
 	bitmap_init(ioq_bitmap, MAX_NUM_IO_QUEUES, 0);
 	nvme_ctrlr = ctrlr;
-    //printf("DEBUGG: before: nvme_ctrl: num_ns: %d\n", nvme_ctrlr->num_ns);
 	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
 
 	if (!spdk_nvme_ns_is_active(ns)) {
@@ -483,7 +481,6 @@ long bsys_nvme_open(long dev_id, long ns_id)
 {
 	struct spdk_nvme_ns *ns;
 	int ioq;
-    //printf("DEBUGGG: ns_id: %ld\n", ns_id);	
 	// FIXME: for now, only support 1 namespace
 	if (ns_id != global_ns_id) {
 		panic("ERROR: only support 1 namespace with ns_id = 1, ns_id: %lx\n", ns_id);
@@ -860,7 +857,7 @@ long bsys_nvme_register_flow(long flow_group_id, unsigned long cookie,
 		}
 		else{
 			printf("Register tenant %ld (port id: %ld). Managed by thread %ld. IOPS_SLO: %lu, r/w %d, scaled_IOPS: %lu tokens/s, latency SLO: %lu us. \n", 
-					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr),  IOPS_SLO, rw_ratio_SLO, nvme_fg->scaled_IOPS_limit, latency_us_SLO);
+					 fg_handle, flow_group_id, RTE_PER_LCORE(cpu_nr), IOPS_SLO, rw_ratio_SLO, nvme_fg->scaled_IOPS_limit, latency_us_SLO);
 		}
 	}
 	nvme_fg->conn_ref_count++;

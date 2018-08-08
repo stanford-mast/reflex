@@ -89,7 +89,7 @@ struct netif *ip_route(struct ip_addr *dest)
 
 void tcp_input_tmp(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct ip_hdr *iphdr, void *tcphdr)
 {
-    printf("DEBUGGG: in tcp input tmp\n");
+    //printf("DEBUGGG: in tcp input tmp\n");
 	struct pbuf *pbuf;
 
 	pbuf = pbuf_alloc(PBUF_RAW, ntoh16(iphdr->len) - iphdr->header_len * 4, PBUF_ROM);
@@ -97,6 +97,7 @@ void tcp_input_tmp(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct ip_hdr *i
 	pbuf->mbuf = pkt;
 //	percpu_get(ip_data).current_iphdr_dest.addr = iphdr->dst_addr.addr;
 //	percpu_get(ip_data).current_iphdr_src.addr = iphdr->src_addr.addr;
+
 	tcp_input(cur_fg,pbuf, &iphdr->src_addr,&iphdr->dst_addr);
 }
 

@@ -149,7 +149,7 @@ static inline unsigned int __cpu_next_active(unsigned int cpu)
 RTE_DECLARE_PER_LCORE(unsigned int, cpu_numa_node);
 RTE_DECLARE_PER_LCORE(unsigned int, cpu_id);
 RTE_DECLARE_PER_LCORE(unsigned int, cpu_nr);
-RTE_DECLARE_PER_LCORE(unsigned int, queue_id); //DEBUGGG
+RTE_DECLARE_PER_LCORE(unsigned int, queue_id); 
 
 
 extern void cpu_do_bookkeeping(void);

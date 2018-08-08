@@ -824,7 +824,6 @@ err_t
 tcp_connect(struct eth_fg *cur_fg,struct tcp_pcb *pcb, ip_addr_t *ipaddr, u16_t port,
       tcp_connected_fn connected)
 {
-
   err_t ret;
   u32_t iss;
   u16_t old_local_port;
@@ -1131,6 +1130,7 @@ void tcp_unified_timer_handler(struct timer *t, struct eth_fg *cur_fg)
 
 	if (pcb->timer_delayedack_expires && pcb->timer_delayedack_expires <=now_us) {
 		KSTATS_VECTOR(timer_tcp_send_delayed_ack);
+
 		tcp_ack_now(pcb);
 		tcp_output(cur_fg,pcb);
 		pcb->flags &= ~TF_ACK_NOW;

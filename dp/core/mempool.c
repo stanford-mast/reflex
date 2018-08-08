@@ -135,7 +135,7 @@ int mempool_create_datastore(struct mempool_datastore *mds, int nr_elems, size_t
 	void* obj_init_arg = NULL;
 	int socket_id = rte_socket_id();
 	unsigned flags = MEMPOOL_F_SC_GET | MEMPOOL_F_SP_PUT; //NOTE: need to modify DPDK rte_mempool.h to use cache for SC/SP
-    if(rte_eal_process_type() == RTE_PROC_PRIMARY) { //DEBUGGG to allow multiprocess
+    if(rte_eal_process_type() == RTE_PROC_PRIMARY) { 
 	    mds->pool = rte_mempool_create(name, nr_elems, elem_len, cache_size, private_data_size, mp_init, mp_init_arg, obj_init, obj_init_arg, socket_id, flags);
     } else {
         mds->pool = rte_mempool_lookup(name);
@@ -376,25 +376,22 @@ rte_mempool_create_align(const char *name, unsigned n, unsigned elt_size,
 	struct rte_mempool *mp;
 	int ret;
 
-	if(rte_eal_process_type() == RTE_PROC_PRIMARY) { //DEBUGGG
+	if(rte_eal_process_type() == RTE_PROC_PRIMARY) { 
         mp = rte_mempool_create_empty(name, n, elt_size, cache_size,
 		    private_data_size, socket_id, flags);
     } else {
         mp = rte_mempool_lookup(name);
     }
 
-    printf("DEBUGGG: r_m_c_a checkpoint 1\n");
 
 	if (mp == NULL)
 		return NULL;
 
-    if(rte_eal_process_type() == RTE_PROC_PRIMARY) { //DEBUGGG
+    if(rte_eal_process_type() == RTE_PROC_PRIMARY) { 
 	    ret = rte_mempool_set_ops_byname(mp, "ring_sp_sc", NULL);
 
-        printf("DEBUGGG: r_m_c_a checkpoint 2\n");
 
 	    if (ret) {
-            printf("DEBUGGG: r_m_c_a fail 1\n");
 		    goto fail;
         }
     }
@@ -403,8 +400,7 @@ rte_mempool_create_align(const char *name, unsigned n, unsigned elt_size,
 	if (mp_init)
 		mp_init(mp, mp_init_arg);
     
-	if (rte_eal_process_type() == RTE_PROC_PRIMARY && rte_mempool_populate_align(mp) < 0) { //DEBUGGG
-        printf("DEBUGGG: r_m_c_a fail 2\n");
+	if (rte_eal_process_type() == RTE_PROC_PRIMARY && rte_mempool_populate_align(mp) < 0) {
 		goto fail;
     }
 
@@ -444,14 +440,12 @@ int mempool_create_datastore_align(struct mempool_datastore *mds, int nr_elems, 
 	int socket_id = rte_socket_id();
 	unsigned flags = MEMPOOL_F_SC_GET | MEMPOOL_F_SP_PUT;
 
-    printf("DEBUGGG: m_c_d_a checkpoint 1\n");
 
 	mds->pool = rte_mempool_create_align(name, nr_elems, elem_len, cache_size, private_data_size, mp_init, mp_init_arg, obj_init, obj_init_arg, socket_id, flags);
 	
 	mds->nr_elems = nr_elems;
 	mds->elem_len = elem_len;
 	
-    printf("DEBUGGG: m_c_d_a checkpoint 2\n");
 
 	if (mds->pool == NULL) {
 		log_err("mempool alloc failed\n");
@@ -508,7 +502,7 @@ int mempool_create_mbuf_datastore(struct mempool_datastore *mds, int nr_elems, s
 	void* obj_init_arg = NULL;
 	int socket_id = rte_socket_id();
 	unsigned flags = MEMPOOL_F_SC_GET | MEMPOOL_F_SP_PUT;
-    if(rte_eal_process_type() == RTE_PROC_PRIMARY) { //DEBUGGG
+    if(rte_eal_process_type() == RTE_PROC_PRIMARY) { 
 	    mds->pool = rte_pktmbuf_pool_create(name, nr_elems, cache_size, private_data_size, elem_len, socket_id);
     } else {
         mds->pool = rte_mempool_lookup(name);

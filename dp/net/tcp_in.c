@@ -188,7 +188,6 @@ tcp_input_find_list(struct LWIP_Context *lwip_ctxt, struct hlist_head *list, ipX
 void
 tcp_input(struct eth_fg *cur_fg, struct pbuf *p, ipX_addr_t *cur_src_addr, ipX_addr_t *cur_dest_addr)
 {
-    printf("???????????DEBUGGG: in tcp_input id: %d\n", cur_fg->fg_id);
 	struct LWIP_Context lwip_context;
 	struct hlist_node *n;
 	
@@ -203,7 +202,6 @@ tcp_input(struct eth_fg *cur_fg, struct pbuf *p, ipX_addr_t *cur_src_addr, ipX_a
 #if CHECKSUM_CHECK_TCP
 	u16_t chksum;
 #endif /* CHECKSUM_CHECK_TCP */
-    //printf("1 DEBUGGG in tcp_input\n");	
 	lwip_context.cur_fg = cur_fg;
 
 	PERF_START;
@@ -217,7 +215,6 @@ tcp_input(struct eth_fg *cur_fg, struct pbuf *p, ipX_addr_t *cur_src_addr, ipX_a
 #if TCP_INPUT_DEBUG
 	tcp_debug_print(lwip_context.tcphdr);
 #endif
-	//printf("2 DEBUGGG in tcp_input\n");
 	/* Check that TCP header fits in payload */
 	if (p->len < sizeof(struct tcp_hdr)) {
 		/* drop short packets */
@@ -248,7 +245,6 @@ tcp_input(struct eth_fg *cur_fg, struct pbuf *p, ipX_addr_t *cur_src_addr, ipX_a
 	  goto dropped;
   }
 #endif /* CHECKSUM_CHECK_TCP */
-  //printf("3 DEBUGGG: in tcp_input\n");
   /* Move the payload pointer in the pbuf so that it points to the
      TCP data instead of the TCP header. */
   hdrlen = TCPH_HDRLEN(lwip_context.tcphdr);
@@ -277,7 +273,6 @@ tcp_input(struct eth_fg *cur_fg, struct pbuf *p, ipX_addr_t *cur_src_addr, ipX_a
      for an active connection. */
   
   
-  //printf("4 DEBUGGG: in tcp_input\n");
 
   pcb = tcp_input_find_list(&lwip_context,&cur_fg->active_tbl[idx].pcbs,cur_src_addr,cur_dest_addr);
   if (pcb) {
@@ -301,7 +296,6 @@ tcp_input(struct eth_fg *cur_fg, struct pbuf *p, ipX_addr_t *cur_src_addr, ipX_a
 	  pbuf_free(p);
 	  return;
   }
-  //printf("5 DEBUGGG: in tcp_input\n");
   /* Finally, if we still did not get a match, we check all PCBs that
      are LISTENing for incoming connections. */
   lpcb = NULL;
@@ -517,7 +511,6 @@ done_tcp_input:
 
         percpu_get(tcp_input_pcb) = NULL;
         /* Try to send something out. */
-        printf("DEBUGGG: ABOUT TO CALL TCP_OUTPUT 3\n");
         tcp_output(cur_fg,pcb);
 #if TCP_INPUT_DEBUG
 #if TCP_DEBUG
@@ -666,9 +659,7 @@ tcp_listen_input(struct LWIP_Context *lwip_ctxt, struct tcp_pcb_listen *pcb, int
 #ifdef ENABLE_KSTATS
     kstats_accumulate save;
 #endif
-    printf("DEBUGGG: ABOUT TO CAL KSTATS_PUSH\n");
     KSTATS_PUSH(tcp_output_syn,&save);
-    printf("DEBUGGG: ABOUT TO CAL TCP_OUTPUT\n");
     rc = tcp_output(lwip_ctxt->cur_fg,npcb);
     KSTATS_POP(&save);
     return rc;
@@ -721,7 +712,6 @@ tcp_timewait_input(struct LWIP_Context *lwip_ctxt, struct tcp_pcb *pcb,ipX_addr_
   if ((lwip_ctxt->tcplen > 0))  {
     /* Acknowledge data, FIN or out-of-window SYN */
     pcb->flags |= TF_ACK_NOW;
-    printf("????????DEBUGGG: BINGO-=-=-=-\n");
     return tcp_output(lwip_ctxt->cur_fg,pcb);
   }
   return ERR_OK;
@@ -741,7 +731,7 @@ tcp_timewait_input(struct LWIP_Context *lwip_ctxt, struct tcp_pcb *pcb,ipX_addr_
 err_t
 tcp_process(struct LWIP_Context * lwip_ctxt, struct tcp_pcb *pcb,ipX_addr_t *cur_src_addr,ipX_addr_t *cur_dest_addr)
 {
-    printf("DEBUGGG: IN TCP_PROCESS flags: %d\n", pcb->flags);
+    //printf("DEBUGGG: IN TCP_PROCESS pcbflags: %d, lwipflags: %d, state: %d\n", pcb->flags, lwip_ctxt->flags, pcb->state);
 	struct eth_fg *cur_fg = lwip_ctxt->cur_fg;
   struct tcp_seg *rseg;
   u8_t acceptable = 0;
@@ -793,7 +783,6 @@ tcp_process(struct LWIP_Context * lwip_ctxt, struct tcp_pcb *pcb,ipX_addr_t *cur
   tcp_parseopt(lwip_ctxt,pcb);
 
   /* Do different things depending on the TCP state. */
-  printf("===DEBUGGG: state: %d\n", pcb->state);
   switch (pcb->state) {
   case SYN_SENT:
     LWIP_DEBUGF(TCP_INPUT_DEBUG, ("SYN-SENT: ackno %"U32_F" pcb->snd_nxt %"U32_F" unacked %"U32_F"\n", lwip_ctxt->ackno,
@@ -853,10 +842,10 @@ tcp_process(struct LWIP_Context * lwip_ctxt, struct tcp_pcb *pcb,ipX_addr_t *cur
     }
     break;
   case SYN_RCVD:
-    printf("DEBUGGG: in SYN_RCVD\n     Flags: %u\n     Ackno: %d\n     Seqno: %d\n     recv_flags: %u\n     tcplen: %d\n", lwip_ctxt->flags, lwip_ctxt->ackno, lwip_ctxt->seqno, lwip_ctxt->recv_flags, lwip_ctxt->tcplen);
+    //printf("DEBUGGG: in SYN_RCVD\n     Flags: %u\n     Ackno: %d\n     Seqno: %d\n     recv_flags: %u\n     tcplen: %d\n", lwip_ctxt->flags, lwip_ctxt->ackno, lwip_ctxt->seqno, lwip_ctxt->recv_flags, lwip_ctxt->tcplen);
 
     if (lwip_ctxt->flags & TCP_ACK) {
-        printf("DEBUGGG: in SYN_RCVD FIRST if\n");
+        //printf("DEBUGGG: in SYN_RCVD FIRST if\n");
       /* expected ACK number? */
       if (TCP_SEQ_BETWEEN(lwip_ctxt->ackno, pcb->lastack+1, pcb->snd_nxt)) {
         tcpwnd_size_t old_cwnd;
@@ -898,7 +887,7 @@ tcp_process(struct LWIP_Context * lwip_ctxt, struct tcp_pcb *pcb,ipX_addr_t *cur
           ipX_current_src_addr(), lwip_ctxt->tcphdr->dest, lwip_ctxt->tcphdr->src, ip_current_is_v6());
       }
     } else if ((lwip_ctxt->flags & TCP_SYN) && (lwip_ctxt->seqno == pcb->rcv_nxt - 1)) {
-        printf("DEBUGGG: in SYN_RCVD SECOND if\n");
+        //printf("DEBUGGG: in SYN_RCVD SECOND if\n");
       /* Looks like another copy of the SYN - retransmit our SYN-ACK */
       tcp_rexmit(pcb);
     }
@@ -1023,7 +1012,6 @@ static void
 tcp_receive(struct LWIP_Context *lwip_ctxt,struct tcp_pcb *pcb)
 {
 	struct eth_fg *cur_fg = lwip_ctxt->cur_fg;
-    printf("````````````DEBUGGG: fg_id: %d\n", cur_fg->fg_id);
   struct tcp_seg *next;
 #if TCP_QUEUE_OOSEQ
   struct tcp_seg *prev, *cseg;
