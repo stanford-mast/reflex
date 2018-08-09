@@ -340,6 +340,9 @@ int init_nvmedev(void)
 
 int init_nvmeqp_cpu(void)
 {
+	//TODO: Make each cpu do this
+	printf("DEBUGGG: TESTING TESTING cpu_id: %d\n", percpu_get(cpu_id));
+
 	if (CFG.num_nvmedev == 0)
 		return 0;
 	
@@ -351,18 +354,15 @@ int init_nvmeqp_cpu(void)
 	opts.io_queue_size = 1024;
 	opts.io_queue_requests = 4096;
 
-    int i;
-    for(i = 0; i < CFG.num_nvmedev; i++) { //DEBUGGG wrapped in for loop
-	    percpu_get(qpair) = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr[i], &opts, sizeof(opts));
-	    assert(percpu_get(qpair));
-    }
+	percpu_get(qpair) = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr[percpu_get(cpu_id)], &opts, sizeof(opts));		
+	assert(percpu_get(qpair));
 	
 	return 0;
 }
 
 void nvmedev_exit(void)
 {
-	struct spdk_nvme_ctrlr *nvme = nvme_ctrlr;
+	struct spdk_nvme_ctrlr *nvme = nvme_ctrlr[percpu_get(cpu_id)];
 	if (!nvme)
 		return;
 }
@@ -520,12 +520,13 @@ nvme_read_cb(void *ctx, const struct spdk_nvme_cpl *cpl)
 
 long bsys_nvme_open(long dev_id, long ns_id)
 {
+	printf("DEBUGGG: TESTING IN BSYS_NVME_OPEN cpu_id: %d\n", percpu_get(cpu_id));
 	struct spdk_nvme_ns *ns;
 	int ioq;
 	// FIXME: for now, only support 1 namespace
 	if (ns_id != global_ns_id) { //DEBUGGG commented out
-		//panic("ERROR: only support 1 namespace with ns_id = 1, ns_id: %lx\n", ns_id);
-		//return -RET_INVAL;
+		panic("ERROR: only support 1 namespace with ns_id = 1, ns_id: %lx\n", ns_id);
+		return -RET_INVAL;
 	}
 	// allocate next available queue 
 	// for now, assume only one bitmap
@@ -538,13 +539,10 @@ long bsys_nvme_open(long dev_id, long ns_id)
 
 	percpu_get(open_ev[percpu_get(open_ev_ptr)++]) = ioq;
 
-    int i;
-    for(i = 0; i < CFG_MAX_NVMEDEV; i++) { //DEBUGGG wrapped in for loop
-	    ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[i], ns_id);
+	    ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], ns_id);
 	    global_ns_size = spdk_nvme_ns_get_size(ns);
 	    global_ns_sector_size = spdk_nvme_ns_get_sector_size(ns);
 	    printf("NVMe device namespace size: %lu bytes, sector size: %lu\n", spdk_nvme_ns_get_size(ns), spdk_nvme_ns_get_sector_size(ns));
-    }
 
 	return RET_OK;
 }
@@ -971,7 +969,7 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 	void* paddr;
 	int ret;
 
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
+	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], global_ns_id);
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
 		printf("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_write\n");
@@ -1029,7 +1027,7 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	unsigned int ns_sector_size;
 	int ret;
 	
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
+	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], global_ns_id);
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
@@ -1129,7 +1127,7 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 	struct nvme_ctx *ctx;
 	int ret;
 	
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
+	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], global_ns_id);
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
@@ -1176,7 +1174,7 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 	struct nvme_ctx *ctx;
 	int ret;
 	
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, global_ns_id);
+	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], global_ns_id);
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
