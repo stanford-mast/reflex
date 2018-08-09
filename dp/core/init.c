@@ -273,7 +273,8 @@ static void init_port(uint8_t port_id, struct eth_addr *mac_addr)
 	}
 
 	// initialize one queue per cpu
-	for (int i = 0; i < CFG.num_cpus; i++) {
+	int i;
+	for (i = 0; i < CFG.num_cpus; i++) {
 		log_info("setting up TX and RX queues...\n");
 		ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), txconf);
 		if (ret < 0) rte_exit(EXIT_FAILURE, "tx queue setup: err=%d, port=%u\n", ret, (unsigned) port_id);
