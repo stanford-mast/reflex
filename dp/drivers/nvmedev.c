@@ -252,7 +252,7 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 	struct spdk_nvme_ns *ns = spdk_nvme_ctrlr_get_ns(ctrlr, 1);
 	
 	bitmap_init(ioq_bitmap, MAX_NUM_IO_QUEUES, 0);
-	nvme_ctrlr[global_i] = ctrlr;
+	nvme_ctrlr[global_i++] = ctrlr;
 	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
 
 	if (!spdk_nvme_ns_is_active(ns)) {
@@ -311,8 +311,9 @@ int init_nvmedev(void)
  */
 int init_nvmedev(void)
 {
-    for(global_i = 0; global_i < CFG.num_nvmedev; global_i++) {
-	    const struct pci_addr *addr = &CFG.nvmedev[global_i];
+    int i;
+    for(i = 0; i < CFG.num_nvmedev; i++) {
+	    const struct pci_addr *addr = &CFG.nvmedev[i];
 	    struct pci_dev *dev;
 
 	    //if (CFG.num_nvmedev > 1)
@@ -324,7 +325,7 @@ int init_nvmedev(void)
 	    if (!dev)
 		    return -ENOMEM;
 
-	    g_nvme_dev[global_i] = dev;
+	    g_nvme_dev[i] = dev;
     
 
 	    if (spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL) != 0) {
