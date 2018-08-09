@@ -44,11 +44,12 @@
 #include <spdk/nvme.h>
 #include <limits.h>
 
-static struct spdk_nvme_ctrlr *nvme_ctrlr = NULL;
+static struct spdk_nvme_ctrlr *nvme_ctrlr[CFG_MAX_NVMEDEV] = {NULL,NULL}; //DEBUGGG made array
 static long global_ns_id = 1;
 static long global_ns_size = 1;
 static long global_ns_sector_size = 1;
-struct pci_dev *g_nvme_dev;
+//struct pci_dev *g_nvme_dev;
+struct pci_dev *g_nvme_dev[CFG_MAX_NVMEDEV]; //DEBUGGG made array
 
 #define MAX_OPEN_BATCH 32 
 #define NUM_NVME_REQUESTS (4096 * 256)//4096 * 64 //1024
@@ -73,6 +74,7 @@ static unsigned long global_num_best_effort_tenants = 0; 			// total num of best
 static unsigned long global_num_lc_tenants = 0; 					// total num of latency critical tenants
 static atomic_t global_be_token_rate_per_tenant = ATOMIC_INIT(0); 	// token rate per best effort tenant
 static unsigned long global_lc_boost_no_BE = 0; 			 		// fair share of leftover tokens that LC tenant can use when no BE registered
+int global_i = 0;
 
 #define MAX_NUM_THREADS 24
 static int scheduled_bit_vector[MAX_NUM_THREADS];
@@ -244,12 +246,13 @@ static void
 attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctrlr,
 	  const struct spdk_nvme_ctrlr_opts *opts)
 {
+    printf("DEBUGGG: IN ATTACH_CB global_i : %d\n", global_i);
 	unsigned int num_ns, nsid;
 	const struct spdk_nvme_ctrlr_data *cdata;
 	struct spdk_nvme_ns *ns = spdk_nvme_ctrlr_get_ns(ctrlr, 1);
 	
 	bitmap_init(ioq_bitmap, MAX_NUM_IO_QUEUES, 0);
-	nvme_ctrlr = ctrlr;
+	nvme_ctrlr[global_i] = ctrlr;
 	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
 
 	if (!spdk_nvme_ns_is_active(ns)) {
@@ -275,7 +278,7 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
  * nvmedev_init - initializes nvme devices
  *
  * Returns 0 if successful, otherwise fail.
- */
+ *
 int init_nvmedev(void)
 {
 	const struct pci_addr *addr = &CFG.nvmedev[0];
@@ -298,6 +301,40 @@ int init_nvmedev(void)
 	}
 	return 0;
 }
+*/
+
+/**
+ * DEBUGGG
+ * nvmedev_init_new - initializes nvme devices
+ *
+ * Returns 0 if successful, otherwise fail.
+ */
+int init_nvmedev(void)
+{
+    for(global_i = 0; global_i < CFG.num_nvmedev; global_i++) {
+	    const struct pci_addr *addr = &CFG.nvmedev[global_i];
+	    struct pci_dev *dev;
+
+	    //if (CFG.num_nvmedev > 1)
+	    //	printf("IX suupports only one NVME device, ignoring all further devices\n");
+	    //if (CFG.num_nvmedev == 0)
+		//    return 0;
+		
+	    dev = pci_alloc_dev(addr);
+	    if (!dev)
+		    return -ENOMEM;
+
+	    g_nvme_dev[global_i] = dev;
+    }
+
+	if (spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL) != 0) {
+		printf("spdk_nvme_probe() failed\n");
+		return 1;
+	}
+    
+	return 0;
+}
+
 
 int init_nvmeqp_cpu(void)
 {
@@ -312,9 +349,10 @@ int init_nvmeqp_cpu(void)
 	opts.io_queue_size = 1024;
 	opts.io_queue_requests = 4096;
 
-	
-	percpu_get(qpair) = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr, &opts, sizeof(opts));
-	assert(percpu_get(qpair));
+    for(int i = 0; i < CFG.num_nvmedev; i++) { //DEBUGGG wrapped in for loop
+	    percpu_get(qpair) = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr[i], &opts, sizeof(opts));
+	    assert(percpu_get(qpair));
+    }
 	
 	return 0;
 }
@@ -482,9 +520,9 @@ long bsys_nvme_open(long dev_id, long ns_id)
 	struct spdk_nvme_ns *ns;
 	int ioq;
 	// FIXME: for now, only support 1 namespace
-	if (ns_id != global_ns_id) {
-		panic("ERROR: only support 1 namespace with ns_id = 1, ns_id: %lx\n", ns_id);
-		return -RET_INVAL;
+	if (ns_id != global_ns_id) { //DEBUGGG commented out
+		//panic("ERROR: only support 1 namespace with ns_id = 1, ns_id: %lx\n", ns_id);
+		//return -RET_INVAL;
 	}
 	// allocate next available queue 
 	// for now, assume only one bitmap
@@ -496,10 +534,14 @@ long bsys_nvme_open(long dev_id, long ns_id)
 	bitmap_init(nvme_fgs_bitmap, MAX_NVME_FLOW_GROUPS, 0);
 
 	percpu_get(open_ev[percpu_get(open_ev_ptr)++]) = ioq;
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, ns_id);
-	global_ns_size = spdk_nvme_ns_get_size(ns);
-	global_ns_sector_size = spdk_nvme_ns_get_sector_size(ns);
-	printf("NVMe device namespace size: %lu bytes, sector size: %lu\n", spdk_nvme_ns_get_size(ns), spdk_nvme_ns_get_sector_size(ns));
+
+    for(int i = 0; i < CFG_MAX_NVMEDEV; i++) { //DEBUGGG wrapped in for loop
+	    ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[i], ns_id);
+	    global_ns_size = spdk_nvme_ns_get_size(ns);
+	    global_ns_sector_size = spdk_nvme_ns_get_sector_size(ns);
+	    printf("NVMe device namespace size: %lu bytes, sector size: %lu\n", spdk_nvme_ns_get_size(ns), spdk_nvme_ns_get_sector_size(ns));
+    }
+
 	return RET_OK;
 }
 
@@ -507,10 +549,10 @@ long bsys_nvme_close(long dev_id, long ns_id, hqu_t handle)
 {
 	printf("BSYS NVME CLOSE\n");
 	// FIXME: for now, only support 1 namespace
-	if (ns_id != global_ns_id) {
-		usys_nvme_closed(-RET_INVAL, -RET_INVAL);
-		panic("ERROR: only support 1 namespace with ns_id = 1\n");
-		return -RET_INVAL;
+	if (ns_id != global_ns_id) { //DEBUGGG commented out
+		//usys_nvme_closed(-RET_INVAL, -RET_INVAL);
+		//panic("ERROR: only support 1 namespace with ns_id = 1\n");
+		//return -RET_INVAL;
 	}
 	bitmap_clear(ioq_bitmap, handle);
 	usys_nvme_closed(handle, 0);
