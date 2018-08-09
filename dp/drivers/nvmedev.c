@@ -349,7 +349,8 @@ int init_nvmeqp_cpu(void)
 	opts.io_queue_size = 1024;
 	opts.io_queue_requests = 4096;
 
-    for(int i = 0; i < CFG.num_nvmedev; i++) { //DEBUGGG wrapped in for loop
+    int i;
+    for(i = 0; i < CFG.num_nvmedev; i++) { //DEBUGGG wrapped in for loop
 	    percpu_get(qpair) = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr[i], &opts, sizeof(opts));
 	    assert(percpu_get(qpair));
     }
@@ -535,7 +536,8 @@ long bsys_nvme_open(long dev_id, long ns_id)
 
 	percpu_get(open_ev[percpu_get(open_ev_ptr)++]) = ioq;
 
-    for(int i = 0; i < CFG_MAX_NVMEDEV; i++) { //DEBUGGG wrapped in for loop
+    int i;
+    for(i = 0; i < CFG_MAX_NVMEDEV; i++) { //DEBUGGG wrapped in for loop
 	    ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[i], ns_id);
 	    global_ns_size = spdk_nvme_ns_get_size(ns);
 	    global_ns_sector_size = spdk_nvme_ns_get_sector_size(ns);
