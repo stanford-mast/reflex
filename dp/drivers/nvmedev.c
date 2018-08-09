@@ -325,12 +325,13 @@ int init_nvmedev(void)
 		    return -ENOMEM;
 
 	    g_nvme_dev[global_i] = dev;
-    }
+    
 
-	if (spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL) != 0) {
-		printf("spdk_nvme_probe() failed\n");
-		return 1;
-	}
+	    if (spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL) != 0) {
+		    printf("spdk_nvme_probe() failed\n");
+		    return 1;
+	    }
+    }
     
 	return 0;
 }
