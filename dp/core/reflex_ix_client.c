@@ -754,12 +754,17 @@ static void* receive_loop(void *arg)
 
 int reflex_client_main(int argc, char *argv[])
 {
+	int i;
+	for(i = 0; i < argc; i++) {
+		printf("%d: %s\n", i, argv[i]);
+	}
+
 	int ret;
 	unsigned int pp_conn_pool_entries;
 	int nr_cpu, req_size_bytes;
 	pthread_t thread[64];
 	int tid[64];
- 	int i;
+ 	//int i;
 	
 	sleep(10);
 
@@ -774,13 +779,16 @@ int reflex_client_main(int argc, char *argv[])
         while ((opt = getopt(argc, argv, "s:p:w:T:i:r:S:R:P:d:t:h")) != -1) {
                 switch (opt) {
 			case 's' :
+				printf("DEBUGGG 1\n");
 				ip = malloc(sizeof(char) * strlen(optarg));
 				strcpy(ip, optarg);
 				break;
 			case 'p' :
+				printf("DEBUGGG 2\n");
 				port = atoi(optarg);
 				break;
                         case 'w' :
+				printf("DEBUGGG 3\n");
 				if (strcmp(optarg, "seq") == 0)
 					sequential = 1;
 				else if (strcmp(optarg, "rand") == 0)
@@ -791,18 +799,23 @@ int reflex_client_main(int argc, char *argv[])
 				}
 				break;
                         case 'T' :
+				printf("DEBUGGG 4\n");
                                 nr_threads = atoi(optarg);
                                 break;
                         case 'i' :
+				printf("DEBUGGG 5\n");
                                 global_target_IOPS = atoi(optarg);
                                 break;
                         case 'r' :
+				printf("DEBUGGG 6\n");
                                 read_percentage = atoi(optarg);
                                 break;
                         case 'S' :
+				printf("DEBUGGG 7\n");
                                 SWEEP = atoi(optarg);
                                 break;
                         case 'R' :
+				printf("DEBUGGG 8\n");
                                 req_size_bytes = atoi(optarg);
                                 if (req_size_bytes % ns_sector_size != 0){
                                         printf("WARNING: request size should be multiple of sector size\n");
@@ -810,15 +823,19 @@ int reflex_client_main(int argc, char *argv[])
 				req_size = req_size_bytes / ns_sector_size;
                                 break;
                         case 'P' :
+				printf("DEBUGGG 9\n");
                                 preconditioning = atoi(optarg);
                                 break;
                         case 'd' :
+				printf("DEBUGGG 10\n");
                                 qdepth = atoi(optarg);
                                 break;
                         case 't' :
+				printf("DEBUGGG 11\n");
                                 run_time = atoi(optarg);
                                 break;
 			case 'h' :
+				printf("DEBUGGG 12\n");
 				fprintf(stderr, "\nUsage: \n"
 					"sudo ./dp/ix\n"
 					"to run ReFlex server, no parameters required\n"
@@ -837,6 +854,7 @@ int reflex_client_main(int argc, char *argv[])
 				);
 				exit(1);
                         default:
+				printf("DEBUGGG: BINGO\n");
                                 fprintf(stderr, "invalid command option\n");
                                 exit(1);
                 }

@@ -696,9 +696,9 @@ int main(int argc, char *argv[])
 
 	log_info("init: starting IX\n");
 
-    if(strcmp(argv[1], "secondary") == 0) {
-        PROCESS_SHOULD_BE_SECONDARY = true;
-    }
+//    if(strcmp(argv[1], "secondary") == 0) {
+//        PROCESS_SHOULD_BE_SECONDARY = true;
+//    }
 
 	log_info("init: cpu phase\n");
 	for (i = 0; init_tbl[i].name; i++)
@@ -710,7 +710,7 @@ int main(int argc, char *argv[])
 	}
 
 	
-	if (argc > 2) { 
+	if (argc > 1) { 
 		ret = reflex_client_main(argc - args_parsed, &argv[args_parsed]);
     } else {
 		    ret = reflex_server_main(argc - args_parsed, &argv[args_parsed]);
