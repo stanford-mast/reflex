@@ -136,7 +136,7 @@ int eth_process_poll(void)
 		// This loops over each queue of a single core (current behaviour is 1 queue to 1 core)
 		// Note that i is the index within a core's list of queues, not the global list of queues.
 		for (i = 0; i < percpu_get(eth_num_queues); i++) {
-            int queue_id = percpu_get(queue_id);
+            int queue_id = percpu_get(cpu_id);
 			ret = rte_eth_rx_burst(active_eth_port, queue_id, &rx_pkts[queue_id], 1); //burst 1 because check queues round-robin
             //printf("ret: %d\n", ret);
 			if (ret) {
@@ -214,7 +214,7 @@ int eth_process_recv(void)
 	do {
 		empty = true;
 		for (i = 0; i < percpu_get(eth_num_queues); i++) {
-            int queue_id = percpu_get(queue_id);
+            int queue_id = percpu_get(cpu_id);
 			struct eth_rx_queue *rxq = percpu_get(eth_rxqs[queue_id]);
 			struct mbuf *pos = rxq->head;
 			if (pos)
@@ -228,7 +228,7 @@ int eth_process_recv(void)
 
 	backlog = 0;
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-        int queue_id = percpu_get(queue_id);
+        int queue_id = percpu_get(cpu_id);
 		backlog += percpu_get(eth_rxqs[queue_id])->len;
     }
 
@@ -342,7 +342,7 @@ void eth_process_send(void)
 	struct eth_tx_queue *txq;
 
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-        int queue_id = percpu_get(queue_id);
+        int queue_id = percpu_get(cpu_id);
 		rte_eth_tx_buffer_flush(active_eth_port, queue_id, percpu_get(tx_buf));
 		// NOTE: rte_eth_tx_buffer_flush appears to flush all queues regardless of the parameter given.
 	}
@@ -359,7 +359,7 @@ void eth_process_reclaim(void)
 	struct eth_tx_queue *txq;
 
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-        int queue_id = percpu_get(queue_id); 
+        int queue_id = percpu_get(cpu_id); 
 		txq = percpu_get(eth_txqs[queue_id]);
 		txq->cap = eth_tx_reclaim(txq);
 	}
