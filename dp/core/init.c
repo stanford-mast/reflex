@@ -101,6 +101,7 @@ static int init_firstcpu(void);
 static int init_hw(void);
 static int init_ethdev(void);
 
+extern int init_global_arrays(void);
 extern int init_nvmedev(void);
 extern int init_nvmeqp_cpu(void);
 extern int init_nvme_request(void);
@@ -127,6 +128,7 @@ struct init_vector_t {
 
 
 static struct init_vector_t init_tbl[] = {
+	{ "global_arrays", init_global_arrays, NULL, NULL},
 	{ "CPU",     cpu_init,     NULL, NULL},
     { "cfgcpu",     init_parse_cpu,     NULL, NULL},            // after cpu  
 	{ "dpdk",    dpdk_init,    NULL, NULL},
