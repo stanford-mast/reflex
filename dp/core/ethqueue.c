@@ -329,9 +329,8 @@ void eth_process_send(void)
 
 
 	for (i = 0; i < percpu_get(eth_num_queues); i++) {
-		rte_eth_tx_buffer_flush(active_eth_port, i, percpu_get(tx_buf)); 
+		nr = rte_eth_tx_buffer_flush(active_eth_port, i, percpu_get(tx_buf)); 
 	}
-
 
 }
 

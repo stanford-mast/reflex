@@ -386,7 +386,50 @@ u16_t
 inet_chksum_pseudo(struct pbuf *p, u8_t proto, u16_t proto_len,
        ip_addr_t *src, ip_addr_t *dest)
 {
-	return in_pseudo(ip4_addr_get_u32(src), ip4_addr_get_u32(dest), hton32(proto + p->tot_len));
+        u32_t acc;
+        u32_t addr;
+        struct pbuf *q;
+        u8_t swapped;
+      
+        acc = 0;
+        swapped = 0;
+        /* iterate through all pbuf in chain */
+        for(q = p; q != NULL; q = q->next) {
+          LWIP_DEBUGF(INET_DEBUG, ("inet_chksum_pseudo(): checksumming pbuf %p (has next %p) \n",
+            (void *)q, (void *)q->next));
+          acc += LWIP_CHKSUM(q->payload, q->len);
+          /*LWIP_DEBUGF(INET_DEBUG, ("inet_chksum_pseudo(): unwrapped lwip_chksum()=%"X32_F" \n", acc));*/
+          /* just executing this next line is probably faster that the if statement needed
+             to check whether we really need to execute it, and does no harm */
+          acc = FOLD_U32T(acc);
+          if (q->len % 2 != 0) {
+            swapped = 1 - swapped;
+            acc = SWAP_BYTES_IN_WORD(acc);
+          }
+          /*LWIP_DEBUGF(INET_DEBUG, ("inet_chksum_pseudo(): wrapped lwip_chksum()=%"X32_F" \n", acc));*/
+        }
+      
+        if (swapped) {
+          acc = SWAP_BYTES_IN_WORD(acc);
+        }
+        addr = ip4_addr_get_u32(src);
+        acc += (addr & 0xffffUL);
+        acc += ((addr >> 16) & 0xffffUL);
+        addr = ip4_addr_get_u32(dest);
+        acc += (addr & 0xffffUL);
+        acc += ((addr >> 16) & 0xffffUL);
+        acc += (u32_t)htons((u16_t)proto);
+        acc += (u32_t)htons(proto_len);
+      
+        /* Fold 32-bit sum to 16 bits
+           calling this twice is propably faster than if statements... */
+        acc = FOLD_U32T(acc);
+        acc = FOLD_U32T(acc);
+        LWIP_DEBUGF(INET_DEBUG, ("inet_chksum_pseudo(): pbuf chain lwip_chksum()=%"X32_F"\n", acc));
+        return (u16_t)~(acc & 0xffffUL);
+
+	// OLD way is modified for TCP checksum
+	//return in_pseudo(ip4_addr_get_u32(src), ip4_addr_get_u32(dest), hton32(proto + p->tot_len));
 
 }
 #if LWIP_IPV6

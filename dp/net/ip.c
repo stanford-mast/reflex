@@ -243,9 +243,9 @@ int ip_output_hinted(struct eth_fg *cur_fg, struct pbuf *p, struct ip_addr *src,
 	}
 
 	/* Offload IP and TCP tx checksums */
-	pkt->ol_flags = PKT_TX_IP_CKSUM;
-	pkt->ol_flags |= PKT_TX_TCP_CKSUM;
-	pkt->ol_flags |= PKT_TX_IPV4;
+	pkt->ol_flags = PKT_TX_IPV4;
+	//pkt->ol_flags |= PKT_TX_TCP_CKSUM; //disable TCP checksum offload for ixgbevf on AWS EC2
+	//pkt->ol_flags |= PKT_TX_IP_CKSUM;  //disable IP checksum offload for ixgbevf on AWS EC2
 
 	pkt->l2_len = sizeof (struct eth_hdr);
 	pkt->l3_len = sizeof (struct ip_hdr);
