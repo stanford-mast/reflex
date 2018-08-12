@@ -58,6 +58,7 @@
 
 #include <sys/socket.h>
 #include <rte_per_lcore.h>
+#include <rte_ip.h>
 
 #include <assert.h>
 #include <ix/stddef.h>
@@ -550,7 +551,6 @@ static err_t on_accept(struct eth_fg *cur_fg, void *arg, struct tcp_pcb *pcb, er
 	struct ip_tuple *id;
 	hid_t handle;
 
-
 	log_debug("tcpapi: on_accept - arg %p, pcb %p, err %d\n",
 		  arg, pcb, err);
 
@@ -932,15 +932,16 @@ int tcp_output_packet(struct eth_fg *cur_fg, struct tcp_pcb *pcb, struct pbuf *p
 	iphdr->src.addr = pcb->local_ip.addr;
 	iphdr->dest.addr = pcb->remote_ip.addr;
 
+
 	// Offload IP and TCP tx checksums 
-	pkt->ol_flags = PKT_TX_IP_CKSUM;
-	pkt->ol_flags |= PKT_TX_TCP_CKSUM;
+	pkt->ol_flags = PKT_TX_IPV4;
+	//pkt->ol_flags |= PKT_TX_IP_CKSUM;     // disable IP checksum offload for ixgbevf on AWS EC2
+	iphdr->_chksum = rte_ipv4_cksum(iphdr); // calculate IP checksum in software
+	//pkt->ol_flags |= PKT_TX_TCP_CKSUM;    // disable TCP checksum for ixgbevf on AWS EC2
 	pkt->ol_flags |= PKT_TX_IPV4;
 
 	pkt->l2_len = sizeof (struct eth_hdr);
 	pkt->l3_len = sizeof (struct ip_hdr);
-	
-	//p->cksum = rte_ipv4_phdr_cksum(iphdr, pkt->ol_flags); //FIXME: pseudo header??
 
 	for (curp = p; curp; curp = curp->next) {
 		memcpy(payload, curp->payload, curp->len);
