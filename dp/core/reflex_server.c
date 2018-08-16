@@ -548,32 +548,32 @@ static struct ixev_ctx *pp_accept(struct ip_tuple *id)
 	switch (id->dst_port) {
 
 	case 1234:
-		latency_us_SLO = 0; //best-effort
-		IOPS_SLO = 0;
+		latency_us_SLO = 500; //best-effort
+		IOPS_SLO = 120000;
 		rd_wr_ratio_SLO = 100;
 		break; 
 	case 1235:
-		latency_us_SLO = 0; //best-effort
-		IOPS_SLO = 0;
-		rd_wr_ratio_SLO = 100;
+		latency_us_SLO = 500; //best-effort
+		IOPS_SLO = 70000;
+		rd_wr_ratio_SLO = 80;
 		break;
 	case 1236:
 		latency_us_SLO = 0; //best-effort
 		IOPS_SLO = 0;
-		rd_wr_ratio_SLO = 100;
+		rd_wr_ratio_SLO = 95;
 		break;
 	case 1237:
 		latency_us_SLO = 0; //best-effort
 		IOPS_SLO = 0;
-		rd_wr_ratio_SLO = 100;
+		rd_wr_ratio_SLO = 25;
 		break;
 	case 5678: 
-		latency_us_SLO = 1000; //latency-critical
-		IOPS_SLO = 120000;
+		latency_us_SLO = 0; //latency-critical
+		IOPS_SLO = 0;
 		rd_wr_ratio_SLO = 100;
 		break;
 	case 5679: 
-		latency_us_SLO = 1000; //latency-critical
+		latency_us_SLO = 500; //latency-critical
 		IOPS_SLO = 70000;
 		rd_wr_ratio_SLO = 80;
 		break;

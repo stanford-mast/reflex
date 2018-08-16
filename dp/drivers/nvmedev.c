@@ -68,11 +68,11 @@ static struct mempool_datastore nvme_swq_datastore;
 
 static struct nvme_flow_group nvme_fgs[MAX_NVME_FLOW_GROUPS];
 static unsigned long global_token_rate[CFG_MAX_NVMEDEV]; 						// max token rate device can handle for current strictest latency SLO
-static atomic_u64_t global_leftover_tokens[CFG_MAX_NVMEDEV] = {ATOMIC_INIT(0),ATOMIC_INIT(0)}; 	 	// shared token bucket
+static atomic_u64_t global_leftover_tokens[CFG_MAX_NVMEDEV] = {ATOMIC_INIT(0),ATOMIC_INIT(0),ATOMIC_INIT(0),ATOMIC_INIT(0),ATOMIC_INIT(0),ATOMIC_INIT(0)}; 	 	// shared token bucket
 static unsigned long global_LC_sum_token_rate[CFG_MAX_NVMEDEV]; 	 				// LC tenant token reservation summed across all LC tenants globally
 static unsigned long global_num_best_effort_tenants[CFG_MAX_NVMEDEV]; 					// total num of best effort tenants
 static unsigned long global_num_lc_tenants[CFG_MAX_NVMEDEV];	 					// total num of latency critical tenants
-static atomic_t global_be_token_rate_per_tenant[CFG_MAX_NVMEDEV] = {ATOMIC_INIT(0),ATOMIC_INIT(0)}; 	// token rate per best effort tenant
+static atomic_t global_be_token_rate_per_tenant[CFG_MAX_NVMEDEV] = {ATOMIC_INIT(0),ATOMIC_INIT(0),ATOMIC_INIT(0),ATOMIC_INIT(0),ATOMIC_INIT(0),ATOMIC_INIT(0)}; 	// token rate per best effort tenant
 static unsigned long global_lc_boost_no_BE[CFG_MAX_NVMEDEV];	 			 		// fair share of leftover tokens that LC tenant can use when no BE registered
 int global_i = 0;
 
@@ -273,7 +273,7 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 	struct spdk_nvme_ns *ns = spdk_nvme_ctrlr_get_ns(ctrlr, 1);
 	
 	bitmap_init(ioq_bitmap, MAX_NUM_IO_QUEUES, 0);
-	nvme_ctrlr[global_i++] = ctrlr;
+	nvme_ctrlr[CFG.cpu[global_i++]] = ctrlr;
 	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
 
 	if (!spdk_nvme_ns_is_active(ns)) {

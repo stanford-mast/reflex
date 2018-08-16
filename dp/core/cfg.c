@@ -683,8 +683,6 @@ static int parse_conf_file(const char *path)
 	
 	for (i = 0; config_tbl[i].name; ++i) {
 		if (config_tbl[i].f) {
-            printf("$$$$$$$$$$function name: %s$$$$$$$$$$$$\n", config_tbl[i].name);
-
 			ret = config_tbl[i].f();
 			if (ret) {
 				log_err("error parsing parameter '%s'\n",
