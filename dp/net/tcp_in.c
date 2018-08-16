@@ -438,6 +438,7 @@ done_tcp_input:
           {
             acked = pcb->acked;
 #endif
+	    //printf("CE_DEBUG: Encountered TCP_EVENT_SENT,\n");
             TCP_EVENT_SENT(pcb, (u16_t)acked, err);
             if (err == ERR_ABRT) {
               goto aborted;
@@ -556,6 +557,9 @@ aborted:
   return;
 
 dropped:
+
+	printf("CE_DEBUG: Packet dropped in tcp_input().\n");
+
   TCP_STATS_INC(tcp.drop);
   snmp_inc_tcpinerrs();
   pbuf_free(p);

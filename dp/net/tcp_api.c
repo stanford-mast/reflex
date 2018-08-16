@@ -58,6 +58,7 @@
 
 #include <sys/socket.h>
 #include <rte_per_lcore.h>
+#include <rte_ip.h>
 
 #include <assert.h>
 #include <ix/stddef.h>
@@ -933,9 +934,16 @@ int tcp_output_packet(struct eth_fg *cur_fg, struct tcp_pcb *pcb, struct pbuf *p
 	iphdr->dest.addr = pcb->remote_ip.addr;
 
 	// Offload IP and TCP tx checksums 
-	pkt->ol_flags = PKT_TX_IP_CKSUM;
-	pkt->ol_flags |= PKT_TX_TCP_CKSUM;
-	pkt->ol_flags |= PKT_TX_IPV4;
+	//pkt->ol_flags = PKT_TX_IP_CKSUM;
+	//pkt->ol_flags |= PKT_TX_TCP_CKSUM;
+	
+	pkt->ol_flags = PKT_TX_IPV4;
+	//pkt->ol_flags |= PKT_TX_IP_CKSUM;     // disable IP checksum offload for ixgbevf on AWS EC2
+	iphdr->_chksum = rte_ipv4_cksum(iphdr); // calculate IP checksum in software
+	//pkt->ol_flags |= PKT_TX_TCP_CKSUM;    // disable TCP checksum for ixgbevf on AWS EC2
+
+
+	//pkt->ol_flags |= PKT_TX_IPV4;
 
 	pkt->l2_len = sizeof (struct eth_hdr);
 	pkt->l3_len = sizeof (struct ip_hdr);

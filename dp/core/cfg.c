@@ -190,7 +190,8 @@ int parse_cfg_fdir_rules(uint8_t port_id)
 		return 0;
 	}
 	
-	for (int i = 0; i < config_setting_length(fdir); i++) {
+	int i;
+	for (i = 0; i < config_setting_length(fdir); i++) {
 		entry = config_setting_get_elem(fdir, i);
 		
 		// Parse destination IP address.

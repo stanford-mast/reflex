@@ -161,12 +161,15 @@ volatile int uaccess_fault;
 
 static struct rte_eth_conf default_eth_conf = {
 	.rxmode = {
-		.max_rx_pkt_len = 9128, /**< use this for jumbo frame */
+		//.max_rx_pkt_len = 9128, /**< use this for jumbo frame */
+		.max_rx_pkt_len = 1460, /**< use this for jumbo frame */
 		.split_hdr_size = 0,
 		.header_split   = 0, /**< Header Split disabled */
-		.hw_ip_checksum = 1, /**< IP checksum offload disabled */
+		.hw_ip_checksum = 0, /**< IP checksum offload disabled */
 		.hw_vlan_filter = 0, /**< VLAN filtering disabled */
-		.jumbo_frame	= 1, /**< Jumbo Frame Support disabled */
+		.hw_vlan_strip	= 1, //CE_DEBUG: ENABLE VLAN STRIPPING
+		//.jumbo_frame	= 1, /**< Jumbo Frame Support disabled */
+		.jumbo_frame	= 0, /**< Jumbo Frame Support disabled */
 		.hw_strip_crc   = 1, /**< CRC stripped by hardware */
 		.mq_mode		= ETH_MQ_RX_RSS,
 	},
@@ -271,9 +274,13 @@ static void init_port(uint8_t port_id, struct eth_addr *mac_addr)
 		//rx_qinfo.scattered_rx = 1;
 		txconf->txq_flags = 0; 
 	}
+	
+	rte_eth_dev_get_mtu(port_id, &mtu);
+	printf("CE_DEBUG: MTU SIZE: %d\n", mtu);
 
 	// initialize one queue per cpu
-	for (int i = 0; i < CFG.num_cpus; i++) {
+	int i;
+	for (i = 0; i < CFG.num_cpus; i++) {
 		log_info("setting up TX and RX queues...\n");
 		ret = rte_eth_tx_queue_setup(port_id, i, nb_tx_desc, rte_eth_dev_socket_id(port_id), txconf);
 		if (ret < 0) rte_exit(EXIT_FAILURE, "tx queue setup: err=%d, port=%u\n", ret, (unsigned) port_id);

@@ -48,7 +48,7 @@ static struct spdk_nvme_ctrlr *nvme_ctrlr = NULL;
 static long global_ns_id = 1;
 static long global_ns_size = 1;
 static long global_ns_sector_size = 1;
-struct pci_dev *g_nvme_dev;
+//struct pci_dev *g_nvme_dev;
 
 #define MAX_OPEN_BATCH 32 
 #define NUM_NVME_REQUESTS (4096 * 256)//4096 * 64 //1024
@@ -286,11 +286,11 @@ int init_nvmedev(void)
 	if (CFG.num_nvmedev == 0)
 		return 0;
 		
-	dev = pci_alloc_dev(addr);
-	if (!dev)
-		return -ENOMEM;
+	//dev = pci_alloc_dev(addr);
+	//if (!dev)
+	//	return -ENOMEM;
 
-	g_nvme_dev = dev;
+	//g_nvme_dev = dev;
 
 	if (spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL) != 0) {
 		printf("spdk_nvme_probe() failed\n");
@@ -500,6 +500,7 @@ long bsys_nvme_open(long dev_id, long ns_id)
 	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr, ns_id);
 	global_ns_size = spdk_nvme_ns_get_size(ns);
 	global_ns_sector_size = spdk_nvme_ns_get_sector_size(ns);
+	//global_ns_sector_size = 512; //CE_DEBUG: hardcodingthis for now
 	printf("NVMe device namespace size: %lu bytes, sector size: %lu\n", spdk_nvme_ns_get_size(ns), spdk_nvme_ns_get_sector_size(ns));
 	return RET_OK;
 }

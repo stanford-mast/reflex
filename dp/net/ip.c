@@ -131,6 +131,19 @@ static void ip_input(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct ip_hdr 
 
 	switch (hdr->proto) {
 	case IPPROTO_TCP:
+		// CE_DEBUG.
+		;
+		char src_addr_str[64];
+		struct ip_addr src;
+		src.addr = hton32((hdr->src_addr).addr);
+		ip_addr_to_str(&src, src_addr_str);
+		char dst_addr_str[64];
+		struct ip_addr dst;
+		dst.addr = hton32((hdr->dst_addr).addr);
+		ip_addr_to_str(&dst, dst_addr_str);
+
+		//printf("___________________________________________________________________\n");
+		//printf("CE_DEBUG: Received Packet:\n\tsrc: %s, dst: %s\n", src_addr_str, dst_addr_str);
 		/* FIXME: change when we integrate better with LWIP */
 		tcp_input_tmp(cur_fg, pkt, hdr, mbuf_nextd_off(hdr, void *, hdrlen));
 		break;
@@ -151,7 +164,7 @@ out:
 }
 
 void eth_input_process(struct rte_mbuf *pkt, int nb_pkts){
-
+	
 	struct eth_hdr *ethhdr = rte_pktmbuf_mtod(pkt, struct eth_hdr *);
 	struct eth_fg *fg;
 
@@ -242,10 +255,14 @@ int ip_output_hinted(struct eth_fg *cur_fg, struct pbuf *p, struct ip_addr *src,
 		payload += curp->len;
 	}
 
-	/* Offload IP and TCP tx checksums */
+	/* Offload IP and TCP tx checksums *
 	pkt->ol_flags = PKT_TX_IP_CKSUM;
 	pkt->ol_flags |= PKT_TX_TCP_CKSUM;
-	pkt->ol_flags |= PKT_TX_IPV4;
+	pkt->ol_flags |= PKT_TX_IPV4;*/
+
+	pkt->ol_flags = PKT_TX_IPV4;
+	//pkt->ol_flags |= PKT_TX_TCP_CKSUM; //disable TCP checksum offload for ixgbevf on AWS EC2
+	//pkt->ol_flags |= PKT_TX_IP_CKSUM;  //disable IP checksum offload for ixgbevf on AWS EC2
 
 	pkt->l2_len = sizeof (struct eth_hdr);
 	pkt->l3_len = sizeof (struct ip_hdr);
@@ -279,6 +296,7 @@ int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct rte_mbuf
 
 	ret = arp_lookup_mac(&dst_addr_, &ethhdr->dhost);
 	if (unlikely(ret)) {
+		printf("CE_DEBUG: THE UNLIKELY OCCURRED, ret = %d, EAGAIN = %d\n", ret, EAGAIN);
 		arp_add_pending_pkt(&dst_addr_, cur_fg, pkt, len);
 		return 0;
 	}
@@ -288,6 +306,7 @@ int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct rte_mbuf
 	pkt->data_len = len; 
 	pkt->pkt_len = len; 
 	//printf("ip_send_one: len %u, pkt %p, dst_addr is %x --> queue %d\n", len, pkt, dst_addr->addr, percpu_get(cpu_id));
+	
 	ret = rte_eth_tx_buffer(active_eth_port, percpu_get(cpu_id), percpu_get(tx_buf), pkt);
 
 	if (unlikely(ret < 0)) {

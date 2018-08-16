@@ -145,6 +145,7 @@ static inline int arp_ip_to_idx(struct ip_addr *addr)
 
 static struct arp_entry *__arp_lookup(struct hlist_head *h, struct ip_addr *addr)
 {
+	//printf("CE_DEBUG: \t\tINSIDE __arp_lookup().\n");
 	struct arp_entry *e;
 	struct hlist_node *pos;
 
@@ -159,6 +160,7 @@ static struct arp_entry *__arp_lookup(struct hlist_head *h, struct ip_addr *addr
 
 static struct arp_entry *arp_lookup(struct ip_addr *addr, bool create_okay)
 {
+	//printf("CE_DEBUG: \tINSIDE arp_lookup()\n");
 	struct arp_entry *e;
 	struct hlist_head *h = &arp_tbl[arp_ip_to_idx(addr)];
 
@@ -176,7 +178,7 @@ static struct arp_entry *arp_lookup(struct ip_addr *addr, bool create_okay)
 		}
 
 		e = (struct arp_entry *)mempool_alloc(&arp_mempool);
-		if (unlikely(!e))
+		if (unlikely(!e)) 
 			return NULL;
 
 		e->addr.addr = addr->addr;
@@ -185,6 +187,7 @@ static struct arp_entry *arp_lookup(struct ip_addr *addr, bool create_okay)
 		timer_init_entry(&e->timer, &arp_timer_handler);
 		hlist_add_head(h, &e->link);
 		spin_unlock(&arp_lock);
+		//printf("CE_DEBUG: \tcreated an empty arp entry.\n");
 		return e;
 	}
 
@@ -292,6 +295,7 @@ static int arp_send_pkt(uint16_t op,
 	ethip->sender_ip.addr = hton32(CFG.host_addr.addr);
 	ethip->target_mac = *target_mac;
 	ethip->target_ip.addr = hton32(target_ip->addr);
+	//printf("CE_DEBUG: \tINSIDE arp_send_pkt() - target_ip = %lu.\n", hton32(target_ip->addr));
 
 	pkt->ol_flags = 0;
 
@@ -402,6 +406,7 @@ out:
  */
 int arp_lookup_mac(struct ip_addr *addr, struct eth_addr *mac)
 {
+	//printf("CE_DEBUG: INSIDE arp_lookup_mac()\n");
 	struct arp_entry *e = arp_lookup(addr, true);
 	if (!e)
 		return -ENOENT;
@@ -412,6 +417,7 @@ int arp_lookup_mac(struct ip_addr *addr, struct eth_addr *mac)
 			struct eth_addr target = ETH_ADDR_BROADCAST;
 
 			e->flags |= ARP_FLAG_RESOLVING;
+			printf("CE_DEBUG: calling arp_send_pkt(%d, %lu, %p)\n", ARP_OP_REQUEST, addr->addr, &target);
 			arp_send_pkt(ARP_OP_REQUEST, addr, &target);
 			timer_add(&e->timer, NULL, ARP_RESOLVE_TIMEOUT);
 		}
