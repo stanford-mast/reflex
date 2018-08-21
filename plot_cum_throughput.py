@@ -48,7 +48,11 @@ for filename in sys.argv[1:]:
 
 lists = sorted(gets.items())
 x, y = zip(*lists)
-plt.plot(x, y)
+g, = plt.plot(x, y, label='GET')
+lists = sorted(puts.items())
+x, y = zip(*lists)
+p, = plt.plot(x, y, label='PUT')
+plt.legend([g, p], ['GET', 'PUT'])
 plt.xlabel('Time(s)')
 plt.ylabel('Cumulative GB/s')
 plt.show()
