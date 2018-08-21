@@ -79,6 +79,7 @@
 #include <ix/utimer.h>
 
 #include <ix/monitor.h>
+#include <time.h>
 
 #define UARR_MIN_CAPACITY	8192
 
@@ -258,6 +259,7 @@ again:
 		printf("------\n");
 		*/
 		util_per_sec = (struct util*) malloc(sizeof(struct util));
+		util_per_sec->time = time(NULL);
 		util_per_sec->num_req_wr = 0;
 		util_per_sec->num_req_rd = 0;
 		util_per_sec->rxbytes = 0;

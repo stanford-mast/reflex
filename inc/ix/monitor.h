@@ -1,5 +1,6 @@
 #include <ix/list.h>
 struct util {
+    unsigned long time; //start time
     unsigned long num_req_wr; //incremented when a write request is fully recieved; reset every second
     unsigned long num_req_rd; //incremented when a read request is fully recieved; reset every second
     //typedef unsigned long size_t

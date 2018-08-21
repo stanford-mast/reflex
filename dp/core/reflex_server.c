@@ -687,7 +687,7 @@ void sig_handler(int signo)
             fprintf(fp, "txbytes/sec=%lu\n", u->txbytes);
             fprintf(fp, "rxbytes/sec=%lu\n", u->rxbytes);
             */
-            fprintf(fp, "%lu\t%lu\t%lu\t%lu\n", u->num_req_wr, u->num_req_rd, u->txbytes,u->rxbytes);
+            fprintf(fp, "%lu\t%lu\t%lu\t%lu\t%lu\n",u->time, u->num_req_wr, u->num_req_rd, u->txbytes,u->rxbytes);
             list_pop(util_list, struct util, link);
             free(u);
         }

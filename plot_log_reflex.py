@@ -14,11 +14,11 @@ log_rx = []
 # log_data[0] = [#req/sec,txbytes/sec,rxbytes/sec]
 for line in lines:
     log_data = line.split('\t')
-    if log_data[0] != '0' or log_data[1] != '0':
-        log_cpu_write_req.append(int(log_data[0]))
-        log_cpu_read_req.append(int(log_data[1]))
-        log_tx.append(int(log_data[2]))
-        log_rx.append(int(log_data[3]))
+    if log_data[1] != '0' or log_data[2] != '0':
+        log_cpu_write_req.append(int(log_data[1]))
+        log_cpu_read_req.append(int(log_data[2]))
+        log_tx.append(int(log_data[3]))
+        log_rx.append(int(log_data[4]))
 
 
 #fig = plt.figure()
