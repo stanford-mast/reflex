@@ -547,8 +547,8 @@ void send_handler(void * arg, int num_req)
 			conn->seq_count += req_size;
 			req->lba = conn->seq_count;
 			assert (req->lba < ns_size / ns_sector_size);
-			if ((req->lba % (((ns_size / ns_sector_size) / req_size)/ 100)) == 0)
-				printf("lba %lu %lu %lu\n", req->lba, NUM_MEASURE, ns_size / ns_sector_size);
+			//if ((req->lba % (((ns_size / ns_sector_size) / req_size)/ 100)) == 0)
+				//printf("lba %lu %lu %lu\n", req->lba, NUM_MEASURE, ns_size / ns_sector_size);
 		}
 		conn->list_len++;
 		list_add_tail(&conn->pending_requests, &req->link);
