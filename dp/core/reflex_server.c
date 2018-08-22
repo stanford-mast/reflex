@@ -58,6 +58,8 @@
 #include <assert.h>
 #include <netinet/in.h>
 
+#include <rte_ethdev.h> //DEBUGGG
+
 #include <ixev.h>
 #include <ixev_timer.h>
 #include <ix/mempool.h>
@@ -547,25 +549,40 @@ static struct ixev_ctx *pp_accept(struct ip_tuple *id)
 	/* LATENCY SLO POLICIES FOR FLOW GROUPS */
 	switch (id->dst_port) {
 
-	case 1234:
-		latency_us_SLO = 500; //best-effort
-		IOPS_SLO = 120000;
+	case 1233:
+		latency_us_SLO = 500;
+		IOPS_SLO = 40000;
 		rd_wr_ratio_SLO = 100;
+		break;
+	case 1234:
+		latency_us_SLO = 500;
+		IOPS_SLO = 30000;
+		rd_wr_ratio_SLO = 75;
 		break; 
 	case 1235:
-		latency_us_SLO = 500; //best-effort
-		IOPS_SLO = 70000;
-		rd_wr_ratio_SLO = 80;
+		latency_us_SLO = 500;
+		IOPS_SLO = 30000;
+		rd_wr_ratio_SLO = 90;
 		break;
 	case 1236:
-		latency_us_SLO = 0; //best-effort
-		IOPS_SLO = 0;
-		rd_wr_ratio_SLO = 95;
+		latency_us_SLO = 500;
+		IOPS_SLO = 35000;
+		rd_wr_ratio_SLO = 100;
 		break;
 	case 1237:
 		latency_us_SLO = 0; //best-effort
 		IOPS_SLO = 0;
-		rd_wr_ratio_SLO = 25;
+		rd_wr_ratio_SLO = 50;
+		break;
+	case 1238:
+		latency_us_SLO = 0;
+		IOPS_SLO = 0;
+		rd_wr_ratio_SLO = 50;
+		break;
+	case 1239:
+		latency_us_SLO = 0;
+		IOPS_SLO = 0;
+		rd_wr_ratio_SLO = 10;
 		break;
 	case 5678: 
 		latency_us_SLO = 0; //latency-critical
@@ -618,6 +635,19 @@ static struct launch_req *launch_reqs;
 void *pp_main(void *arg)
 {
 	int ret;
+
+	//DEBUGGG start
+	struct rte_eth_rss_conf rss_conf;
+        ret = rte_eth_dev_rss_hash_conf_get(0, &rss_conf);
+        printf("DEBUGGG: ETH_RSS_IPV4: %ld, hf: %ld\n", ETH_RSS_IPV4, rss_conf.rss_hf);
+        rss_conf.rss_hf = ETH_RSS_PORT;
+	ret = rte_eth_dev_rss_hash_update(0, &rss_conf);
+	ret = rte_eth_dev_rss_hash_conf_get(0, &rss_conf);
+	printf("DEBUGGG: ETH_RSS_IPV4: %ld, hf: %ld\n", ETH_RSS_IPV4, rss_conf.rss_hf);
+	//DEBUGGG end
+	
+
+
 	conn_opened = 0;
 	printf("pp_main on cpu %d, thread self is %x\n", percpu_get(cpu_nr), pthread_self());
 	struct launch_req *req;
