@@ -303,26 +303,68 @@ static int add_port(int port)
 	++CFG.num_ports;
 	return 0;
 }
+//DEBUGGG
+static int add_port_to_dev(int dev)
+{
+	if(dev < 0)
+		return -EINVAL;
+	CFG.port_to_dev[CFG.num_ports] = dev;
+	return 0;
+}
 
+//DEBUGGG
+static int add_port_to_cpu(int cpu) 
+{
+	if(cpu < 0)
+		return -EINVAL;
+	CFG.port_to_cpu[CFG.num_ports] = cpu;
+	return 0;
+}
+
+//DEBUGGG
 static int parse_port(void)
 {
+	printf("DEBUGGG: in parse_port 1\n");
 	const config_setting_t *ports = NULL;
+	const config_setting_t *devices = NULL;
+	const config_setting_t *cpus = NULL;
+
 	int port, ret;
+	int device, ret2;
+	int cpu, ret3;
 
 	ports = config_lookup(&cfg, "port");
-	if (!ports)
+	devices = config_lookup(&cfg, "port_to_dev");
+	cpus = config_lookup(&cfg, "port_to_cpu");
+	if (!ports || !devices || !cpus)
 		return -EINVAL;
+
+	printf("DEBUGGG:in parse_port 2\n");
+
 	port = config_setting_get_int(ports);
-	if (port)
-		return add_port(port);
+	device = config_setting_get_int(devices);
+	cpu = config_setting_get_int(cpus);
+	if (port && device && cpu) {
+		int return1 = add_port_to_dev(device);
+		int return2 = add_port_to_cpu(cpu);
+		int return3 = add_port(port);
+		return return1 | return2 | return3;
+	}
 	CFG.num_ports = 0;
 	while (CFG.num_ports < CFG_MAX_PORTS && CFG.num_ports < config_setting_length(ports)) {
 		port = 0;
+		device = 0;
+		cpu = 0;
 		port = config_setting_get_int_elem(ports, CFG.num_ports);
+		device = config_setting_get_int_elem(devices, CFG.num_ports);
+		cpu = config_setting_get_int_elem(cpus, CFG.num_ports);
+		ret2 = add_port_to_dev(device);
+		ret3 = add_port_to_cpu(cpu);
 		ret = add_port(port);
-		if (ret)
-			return ret;
+		if (ret || ret2 || ret3 )
+			return ret | ret2 | ret3;
 	}
+	printf("DEBUGGG: in parse_port 3\n");
 	return 0;
 }
 
@@ -683,6 +725,7 @@ static int parse_conf_file(const char *path)
 	
 	for (i = 0; config_tbl[i].name; ++i) {
 		if (config_tbl[i].f) {
+			printf("DEBUGGG: ABOUT TO CALL A CFG FUNCTION\n");
 			ret = config_tbl[i].f();
 			if (ret) {
 				log_err("error parsing parameter '%s'\n",
@@ -823,5 +866,47 @@ int cfg_parse_cpu(int argc, char *argv[], int *args_parsed)
 	if (ret)
 		return ret;
 	
+	return 0;
+}
+
+static bool in_array(int val)
+{
+	int i;
+	for(i = 0; i < CFG_MAX_PORTS; i++) {
+		if(RTE_PER_LCORE(dev_array)[i] == val)
+			return true;
+	}
+	return false;
+}
+
+//DEBUGGG
+int cfg_init_cpu(void)
+{
+	printf("DEBUGGG: IN cfg_init_cpu with core: %d\n", percpu_get(cpu_id));
+	int i, i2;
+	int j = 0;
+	int k = CFG_MAX_PORTS - 1;
+	unsigned int temp_arr[CFG_MAX_PORTS];
+	for(i2 = 0; i2 < CFG_MAX_PORTS; i2++) {
+		RTE_PER_LCORE(dev_array)[i2] = -1;
+	}
+
+	for(i = 0; i < CFG_MAX_PORTS; i++) {
+		if(CFG.ports[i] == 0) { 
+		//	RTE_PER_LCORE(dev_array)[k--] = -1;
+			break;
+		}
+		if(CFG.port_to_cpu[i] == percpu_get(cpu_id) && !in_array(CFG.port_to_dev[i])) {
+			int dev = CFG.port_to_dev[i];
+			printf("DEBUGGG in if, dev: %d, i: %d\n", dev, i);
+			//temp_arr[j++] = dev;			
+			RTE_PER_LCORE(dev_array)[j++] = dev;
+			//printf("end of if\n");
+		} //else {
+			//temp_arr[k--] = -1;
+		//	RTE_PER_LCORE(dev_array)[k--] = -1;
+		//}
+	}
+	//printf("FINAL: i: %d, j: %d, k: %d\n", i, j, k);
 	return 0;
 }

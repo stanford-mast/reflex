@@ -95,6 +95,8 @@
 #define ENERGY_UNIT_MASK 0x1F00
 #define ENERGY_UNIT_OFFSET 0x08
 
+extern int cfg_init_cpu(void); //DEBUGGG
+
 static int init_parse_cpu(void);
 static int init_cfg(void);
 static int init_firstcpu(void);
@@ -134,7 +136,7 @@ static struct init_vector_t init_tbl[] = {
 	{ "dpdk",    dpdk_init,    NULL, NULL},
 	{ "timer",   timer_init,   timer_init_cpu, NULL},
 	{ "net",     net_init,     NULL, NULL},
-	{ "cfg",     init_cfg,     NULL, NULL},              // after net
+	{ "cfg",     init_cfg,     cfg_init_cpu, NULL},              // after net DEBUGGG added secind function
 	{ "cp",      cp_init,      NULL, NULL},
 	{ "firstcpu", init_firstcpu, NULL, NULL},             // after cfg
 	{ "mbuf",    mbuf_init,    mbuf_init_cpu, NULL},      // after firstcpu
@@ -177,6 +179,8 @@ static struct rte_eth_conf default_eth_conf = {
 	.rx_adv_conf = {
 		.rss_conf = {
 			.rss_hf = ETH_RSS_NONFRAG_IPV4_TCP | ETH_RSS_NONFRAG_IPV4_UDP,
+			//.rss_hf = ETH_RSS_PORT,
+			//.rss_hf = ETH_RSS_IPV4,
 		},
 	},
 	.txmode = {
@@ -240,13 +244,22 @@ int add_fdir_rules(uint8_t port_id)
 static void init_port(uint8_t port_id, struct eth_addr *mac_addr)
 {
 	int ret;
-    int i;
+    	int i;
 
 	uint16_t nb_rx_q = CFG.num_cpus; 
 	uint16_t nb_tx_q = CFG.num_cpus;
 	struct rte_eth_conf *dev_conf; 
 
 	dev_conf = &default_eth_conf;
+
+	/*
+	//DEBUGGG start
+	printf("DEBUGG about to get info\n");
+	struct rte_eth_dev_info rett;
+	rte_eth_dev_info_get((uint16_t)port_id, &rett);
+	printf("DEBUGGG: NIC DATA: rx_offload_cap: %d, hash_key_size: %d, flow_type_rss_offloads: %ld\n", rett.rx_offload_capa, rett.hash_key_size, rett.flow_type_rss_offloads);
+	//DEBUGGG end
+	*/
 
 	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; //1024
 	uint16_t nb_rx_desc = ETH_DEV_RX_QUEUE_SZ; //512
@@ -329,6 +342,20 @@ static void init_port(uint8_t port_id, struct eth_addr *mac_addr)
 		    rte_eth_macaddr_get(port_id, mac_addr);
 		    active_eth_port = port_id;
 	    }
+
+	/*
+	//DEBUGGG start
+        printf("DEBUGG about to get info\n");
+        //struct rte_eth_dev_info rett;
+        struct rte_eth_rss_conf rett2;
+	int val = rte_eth_dev_rss_hash_conf_get((uint16_t)port_id, &rett2);
+	printf("<><><><><>DEBUGGG: %d\n", val);
+	//rte_eth_dev_info_get((uint16_t)port_id, &rett);
+        //printf("DEBUGGG: NIC DATA: rx_offload_cap: %d, hash_key_size: %d, flow_type_rss_offloads: %ld\n", rett.rx_offload_capa, rett.hash_key_size, rett.flow_type_rss_offloads); 
+	printf("DEBUGGG: RSS DATA: rss_key:        %d, rss_key_len:   %d, rss_hf:                 %ld\n", *(rett2.rss_key), rett2.rss_key_len, rett2.rss_hf);
+        //DEBUGGG end
+	*/
+
 }
 
 
@@ -373,6 +400,16 @@ static int init_ethdev(void)
     return 0;
 }
 
+//DEBUGGG
+static void print_array_cpu(void)
+{
+	int i;
+	for(i = 0; i < CFG_MAX_PORTS; i++) {
+		printf("array[%d]: %d\n", i, percpu_get(dev_array[i]));
+	}
+}
+
+
 /**
  * init_create_cpu - initializes a CPU
  * @cpu: the CPU number
@@ -393,14 +430,16 @@ static int init_create_cpu(unsigned int cpu, int first)
 	}
 
 	log_info("init: percpu phase %d\n", cpu);
-	for (i = 0; init_tbl[i].name; i++)
+	for (i = 0; init_tbl[i].name; i++) {
 		if (init_tbl[i].fcpu) {
 			ret = init_tbl[i].fcpu();
 			log_info("init: module %-10s on %d: %s \n", init_tbl[i].name, RTE_PER_LCORE(cpu_id), (ret ? "FAILURE" : "SUCCESS"));
 			if (ret)
 				panic("could not initialize IX\n");
 		}
-
+	}
+	printf("DEBUGGG: ABOUT TO PRINT PER LCORE ARRAY\n");
+	print_array_cpu();
 
 	log_info("init: CPU %d ready\n", cpu);
 	printf("init:CPU %d ready\n", cpu);
@@ -689,6 +728,17 @@ static int init_firstcpu(void)
 	return ret;
 }
 
+//DEBUGGG
+void print_arrays(void)
+{
+	int i;
+	printf("PORTS   CPUS   DEVS\n");
+	printf("_____   ____   ____\n");
+	for(i = 0; i < CFG_MAX_PORTS; i++) {
+		printf(" %d      %d      %d\n", CFG.ports[i], CFG.port_to_cpu[i], CFG.port_to_dev[i]);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int ret, i;
@@ -710,7 +760,7 @@ int main(int argc, char *argv[])
 			if (ret)
 				panic("could not initialize IX\n");
 	}
-
+	print_arrays();
 	
 	if (argc > 1) { 
 		ret = reflex_client_main(argc - args_parsed, &argv[args_parsed]);

@@ -19,7 +19,11 @@ gateway_addr="192.168.1.1"
 ## port : port(s) that will be bound to the application by the
 ##      kernel when launching IX.
 ##      You can specify multiple entries, e.g. 'port=[X, Y, Z]'
-port=1234
+##      port, port_to_dev, and port_to_cpu must have same length.
+##      each index corresponds to a port paired with a cpu and device
+port=[1233, 1234, 1235, 1236, 1237, 1238, 1239, 5678]
+port_to_dev=[1,0,1,0,1,0,1,0]
+port_to_cpu=[0,0,0,0,0,0,0,0]
 
 ###############################################################################
 # Hardware parameters
@@ -65,6 +69,8 @@ scheduler="on"
 ##      Usually `lstopo` allows to see NUMA nodes topology
 ##      You can specify multiple entries, e.g. 'nodes=["X","Y","Z"]'
 cpu=0
+num_process=1
+queue_id=0
 
 ## batch : Specifies maximum batch size of received packets to process.
 ##      Default: 64.

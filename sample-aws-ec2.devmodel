@@ -67,32 +67,32 @@ token_limits=(
   {
 	p95_latency_limit 		 : 500 		#in us
 	max_token_rate 	  		 : 24000000	#in tokens
-    max_rdonly_token_rate 	 : 38000000	#in tokens
+    	max_rdonly_token_rate 	 	 : 38000000	#in tokens
   },
   {
 	p95_latency_limit 		 : 1000 	#in us
-    max_token_rate 	  		 : 33000000	#in tokens
-    max_rdonly_token_rate 	 : 39000000	#in tokens
+    	max_token_rate 	  		 : 33000000	#in tokens
+    	max_rdonly_token_rate 	 	 : 39000000	#in tokens
   },
   {
 	p95_latency_limit 		 : 1500 	#in us
-    max_token_rate 	  		 : 35000000	#in tokens
-	max_rdonly_token_rate	 : 40000000 #in tokens
+    	max_token_rate 	  		 : 35000000	#in tokens
+	max_rdonly_token_rate	 	 : 40000000 #in tokens
   },
   {
-	p95_latency_limit 		: 2000 		#in us
-    max_token_rate 	  		: 37000000	#in tokens
-    max_rdonly_token_rate	: 41000000	#in tokens
+	p95_latency_limit 		 : 2000 		#in us
+    	max_token_rate 	  		 : 37000000	#in tokens
+    	max_rdonly_token_rate		 : 41000000	#in tokens
   },
   {
 	p95_latency_limit 		 : 2500 	#in us
-    max_token_rate 	  		 : 39000000	#in tokens
-	max_rdonly_token_rate	 : 41000000 #in tokens
+    	max_token_rate 	  		 : 39000000	#in tokens
+	max_rdonly_token_rate	 	 : 41000000 #in tokens
   },
   {
 	p95_latency_limit 		 : 3000 	#in us
-    max_token_rate 	  		 : 41000000	#in tokens
-	max_rdonly_token_rate	 : 41500000 #in tokens
+    	max_token_rate 	  		 : 41000000	#in tokens
+	max_rdonly_token_rate	 	 : 41500000 #in tokens
   }
 )
 

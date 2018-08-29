@@ -150,7 +150,7 @@ RTE_DECLARE_PER_LCORE(unsigned int, cpu_numa_node);
 RTE_DECLARE_PER_LCORE(unsigned int, cpu_id);
 RTE_DECLARE_PER_LCORE(unsigned int, cpu_nr);
 RTE_DECLARE_PER_LCORE(unsigned int, queue_id); 
-
+RTE_DECLARE_PER_LCORE(unsigned int, dev_array[16]);
 
 extern void cpu_do_bookkeeping(void);
 

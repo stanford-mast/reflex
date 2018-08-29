@@ -240,6 +240,7 @@ struct ix_rte_eth_rxmode {
  * types of IPv4/IPv6 packets to which the RSS hashing must be applied.
  * Supplying an *rss_hf* equal to zero disables the RSS feature.
  */
+
 struct ix_rte_eth_rss_conf {
 	uint8_t  *rss_key;   /**< If not NULL, 40-byte hash key. */
 	uint16_t rss_hf;     /**< Hash functions to apply - see below. */
@@ -301,6 +302,7 @@ struct ix_rte_eth_rss_conf {
 #define ETH_VMDQ_UPLINK_MIRROR  0x0002 /**< Uplink Port Mirroring. */
 #define ETH_VMDQ_DOWNLIN_MIRROR 0x0004 /**< Downlink Port Mirroring. */
 #define ETH_VMDQ_VLAN_MIRROR    0x0008 /**< VLAN Mirroring. */
+
 
 /**
  * A structure used to configure VLAN traffic mirror of an Ethernet port.
