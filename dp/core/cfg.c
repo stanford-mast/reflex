@@ -303,7 +303,8 @@ static int add_port(int port)
 	++CFG.num_ports;
 	return 0;
 }
-//DEBUGGG
+
+//adds to the port_to_dev array
 static int add_port_to_dev(int dev)
 {
 	if(dev < 0)
@@ -312,7 +313,7 @@ static int add_port_to_dev(int dev)
 	return 0;
 }
 
-//DEBUGGG
+//adds to the port_to_cpu array
 static int add_port_to_cpu(int cpu) 
 {
 	if(cpu < 0)
@@ -321,10 +322,9 @@ static int add_port_to_cpu(int cpu)
 	return 0;
 }
 
-//DEBUGGG
+//parses port and devices/cpus that correspond to each port
 static int parse_port(void)
 {
-	printf("DEBUGGG: in parse_port 1\n");
 	const config_setting_t *ports = NULL;
 	const config_setting_t *devices = NULL;
 	const config_setting_t *cpus = NULL;
@@ -339,7 +339,6 @@ static int parse_port(void)
 	if (!ports || !devices || !cpus)
 		return -EINVAL;
 
-	printf("DEBUGGG:in parse_port 2\n");
 
 	port = config_setting_get_int(ports);
 	device = config_setting_get_int(devices);
@@ -364,7 +363,6 @@ static int parse_port(void)
 		if (ret || ret2 || ret3 )
 			return ret | ret2 | ret3;
 	}
-	printf("DEBUGGG: in parse_port 3\n");
 	return 0;
 }
 
@@ -725,7 +723,6 @@ static int parse_conf_file(const char *path)
 	
 	for (i = 0; config_tbl[i].name; ++i) {
 		if (config_tbl[i].f) {
-			printf("DEBUGGG: ABOUT TO CALL A CFG FUNCTION\n");
 			ret = config_tbl[i].f();
 			if (ret) {
 				log_err("error parsing parameter '%s'\n",
@@ -879,10 +876,9 @@ static bool in_array(int val)
 	return false;
 }
 
-//DEBUGGG
+//create the per cpu variabel dev_array used to keep track of which devices a certain cpu must use
 int cfg_init_cpu(void)
 {
-	printf("DEBUGGG: IN cfg_init_cpu with core: %d\n", percpu_get(cpu_id));
 	int i, i2;
 	int j = 0;
 	int k = CFG_MAX_PORTS - 1;
@@ -898,7 +894,6 @@ int cfg_init_cpu(void)
 		}
 		if(CFG.port_to_cpu[i] == percpu_get(cpu_id) && !in_array(CFG.port_to_dev[i])) {
 			int dev = CFG.port_to_dev[i];
-			printf("DEBUGGG in if, dev: %d, i: %d\n", dev, i);
 			//temp_arr[j++] = dev;			
 			RTE_PER_LCORE(dev_array)[j++] = dev;
 			//printf("end of if\n");

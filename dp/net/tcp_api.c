@@ -778,12 +778,6 @@ struct eth_fg *get_local_port_and_set_queue(struct ip_tuple *id)
 		return fg;
 	}
 
-	//DEBUGGG start
-	//ret = rte_eth_dev_rss_hash_conf_get(0, &rss_conf);
-	//printf("DEBUGGG: hf: %ld\n", rss_conf.rss_hf);	
-	//DEBUGGG end
-
-
 	//FIXME: use this when AWS supports RSS hash key get
 	/*
 	ret = rte_eth_dev_rss_hash_conf_get(0, &rss_conf); 
