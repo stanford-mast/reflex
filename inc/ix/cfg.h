@@ -105,8 +105,8 @@ struct cfg_parameters {
 
 	int num_ports;
 	uint16_t ports[CFG_MAX_PORTS];
-	int port_to_dev[CFG_MAX_PORTS]; //DEBUGGG
-	int port_to_cpu[CFG_MAX_PORTS]; //DEBUGGG
+	int port_to_dev[CFG_MAX_PORTS];
+	int port_to_cpu[CFG_MAX_PORTS];
 
 	char loader_path[256];
 };

@@ -124,7 +124,6 @@ int init_global_arrays(void)
 
 //Go through port array to find index that has the desired port. Return nvme_dev_id at index of this found index
 //if successful port id is found, that id is returned, if not, -1 is returned
-//DEBUGGG
 int get_dev_id(int port)
 {
 	/*	
@@ -403,7 +402,6 @@ int init_nvmeqp_cpu(void)
 	bool end = false;
 	for(i = 0; i < CFG_MAX_PORTS && !end; i++) {
 		int dev_id = percpu_get(dev_array)[i];	
-		printf("DEBUGGG: cpu_id: %d, dev_id: %d\n", percpu_get(cpu_id), dev_id);
 		percpu_get(qpair)[dev_id] = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr[dev_id], &opts, sizeof(opts));		
 		assert(percpu_get(qpair)[dev_id]);
 		end = percpu_get(dev_array)[i+1] == -1;
@@ -572,7 +570,6 @@ nvme_read_cb(void *ctx, const struct spdk_nvme_cpl *cpl)
 
 long bsys_nvme_open(long dev_id, long ns_id)
 {
-	//printf("<><><>DEBUGGG: IN BSYS_NVME_OPEN with cpu_id: %d, dev_id: %d, ns_id: %d\n", percpu_get(cpu_id), dev_id, ns_id);
 	int i;
 	bool end = false;
 	for(i = 0; i < CFG_MAX_PORTS && !end; i++) {
@@ -1034,8 +1031,8 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 	struct nvme_ctx *ctx;
 	void* paddr;
 	int ret;
-	int dst_port = nvme_fgs[fg_handle].flow_group_id; //DEBUGGG
-	int dev_id = get_dev_id(dst_port); //DEBUGGG
+	int dst_port = nvme_fgs[fg_handle].flow_group_id;
+	int dev_id = get_dev_id(dst_port);
 
 	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[dev_id], global_ns_id);
 	ctx = alloc_local_nvme_ctx();
@@ -1095,8 +1092,8 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	unsigned int ns_sector_size;
 	int ret;
 	
-        int dst_port = nvme_fgs[fg_handle].flow_group_id; //DEBUGGG
-        int dev_id = get_dev_id(dst_port); //DEBUGGG
+        int dst_port = nvme_fgs[fg_handle].flow_group_id;
+        int dev_id = get_dev_id(dst_port);
 
 	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[dev_id], global_ns_id);
 	
@@ -1198,8 +1195,8 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 	struct nvme_ctx *ctx;
 	int ret;
 
-        int dst_port = nvme_fgs[fg_handle].flow_group_id; //DEBUGGG
-        int dev_id = get_dev_id(dst_port); //DEBUGGG
+        int dst_port = nvme_fgs[fg_handle].flow_group_id;
+        int dev_id = get_dev_id(dst_port);
 	
 	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[dev_id], global_ns_id);
 	
@@ -1249,8 +1246,8 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 	struct nvme_ctx *ctx;
 	int ret;
 
-        int dst_port = nvme_fgs[fg_handle].flow_group_id; //DEBUGGG
-        int dev_id = get_dev_id(dst_port); //DEBUGGG
+        int dst_port = nvme_fgs[fg_handle].flow_group_id;
+        int dev_id = get_dev_id(dst_port);
 	
 	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[dev_id], global_ns_id);
 
@@ -1340,7 +1337,6 @@ static void issue_nvme_req(struct nvme_ctx* ctx)
 		// for SGL:
 		ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair)[dev_id], ctx->lba, ctx->lba_count,
 									 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
-		printf("DEBUGGG: dev_id: %d\n", dev_id);
 	}
 	else if (ctx->cmd == NVME_CMD_WRITE) {
 		// if PRP:

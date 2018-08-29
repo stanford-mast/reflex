@@ -95,7 +95,7 @@
 #define ENERGY_UNIT_MASK 0x1F00
 #define ENERGY_UNIT_OFFSET 0x08
 
-extern int cfg_init_cpu(void); //DEBUGGG
+extern int cfg_init_cpu(void);
 
 static int init_parse_cpu(void);
 static int init_cfg(void);
@@ -136,7 +136,7 @@ static struct init_vector_t init_tbl[] = {
 	{ "dpdk",    dpdk_init,    NULL, NULL},
 	{ "timer",   timer_init,   timer_init_cpu, NULL},
 	{ "net",     net_init,     NULL, NULL},
-	{ "cfg",     init_cfg,     cfg_init_cpu, NULL},              // after net DEBUGGG added secind function
+	{ "cfg",     init_cfg,     cfg_init_cpu, NULL},              // after net
 	{ "cp",      cp_init,      NULL, NULL},
 	{ "firstcpu", init_firstcpu, NULL, NULL},             // after cfg
 	{ "mbuf",    mbuf_init,    mbuf_init_cpu, NULL},      // after firstcpu
@@ -252,15 +252,6 @@ static void init_port(uint8_t port_id, struct eth_addr *mac_addr)
 
 	dev_conf = &default_eth_conf;
 
-	/*
-	//DEBUGGG start
-	printf("DEBUGG about to get info\n");
-	struct rte_eth_dev_info rett;
-	rte_eth_dev_info_get((uint16_t)port_id, &rett);
-	printf("DEBUGGG: NIC DATA: rx_offload_cap: %d, hash_key_size: %d, flow_type_rss_offloads: %ld\n", rett.rx_offload_capa, rett.hash_key_size, rett.flow_type_rss_offloads);
-	//DEBUGGG end
-	*/
-
 	uint16_t nb_tx_desc = ETH_DEV_TX_QUEUE_SZ; //1024
 	uint16_t nb_rx_desc = ETH_DEV_RX_QUEUE_SZ; //512
 	struct rte_eth_dev_info dev_info;
@@ -342,20 +333,6 @@ static void init_port(uint8_t port_id, struct eth_addr *mac_addr)
 		    rte_eth_macaddr_get(port_id, mac_addr);
 		    active_eth_port = port_id;
 	    }
-
-	/*
-	//DEBUGGG start
-        printf("DEBUGG about to get info\n");
-        //struct rte_eth_dev_info rett;
-        struct rte_eth_rss_conf rett2;
-	int val = rte_eth_dev_rss_hash_conf_get((uint16_t)port_id, &rett2);
-	printf("<><><><><>DEBUGGG: %d\n", val);
-	//rte_eth_dev_info_get((uint16_t)port_id, &rett);
-        //printf("DEBUGGG: NIC DATA: rx_offload_cap: %d, hash_key_size: %d, flow_type_rss_offloads: %ld\n", rett.rx_offload_capa, rett.hash_key_size, rett.flow_type_rss_offloads); 
-	printf("DEBUGGG: RSS DATA: rss_key:        %d, rss_key_len:   %d, rss_hf:                 %ld\n", *(rett2.rss_key), rett2.rss_key_len, rett2.rss_hf);
-        //DEBUGGG end
-	*/
-
 }
 
 
@@ -400,7 +377,7 @@ static int init_ethdev(void)
     return 0;
 }
 
-//DEBUGGG
+//prints the device array that is unique to each cpu
 static void print_array_cpu(void)
 {
 	int i;
@@ -438,7 +415,6 @@ static int init_create_cpu(unsigned int cpu, int first)
 				panic("could not initialize IX\n");
 		}
 	}
-	printf("DEBUGGG: ABOUT TO PRINT PER LCORE ARRAY\n");
 	print_array_cpu();
 
 	log_info("init: CPU %d ready\n", cpu);
@@ -728,7 +704,7 @@ static int init_firstcpu(void)
 	return ret;
 }
 
-//DEBUGGG
+//prints the array that shows port to cpu and port to device information
 void print_arrays(void)
 {
 	int i;

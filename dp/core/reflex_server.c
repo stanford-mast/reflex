@@ -58,7 +58,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 
-#include <rte_ethdev.h> //DEBUGGG
+#include <rte_ethdev.h>
 
 #include <ixev.h>
 #include <ixev_timer.h>
@@ -635,19 +635,6 @@ static struct launch_req *launch_reqs;
 void *pp_main(void *arg)
 {
 	int ret;
-
-	/*
-	//DEBUGGG start
-	struct rte_eth_rss_conf rss_conf;
-        ret = rte_eth_dev_rss_hash_conf_get(0, &rss_conf);
-        printf("DEBUGGG: ETH_RSS_IPV4: %ld, hf: %ld\n", ETH_RSS_IPV4, rss_conf.rss_hf);
-        rss_conf.rss_hf = ETH_RSS_PORT;
-	ret = rte_eth_dev_rss_hash_update(0, &rss_conf);
-	ret = rte_eth_dev_rss_hash_conf_get(0, &rss_conf);
-	printf("DEBUGGG: ETH_RSS_IPV4: %ld, hf: %ld\n", ETH_RSS_IPV4, rss_conf.rss_hf);
-	//DEBUGGG end
-	*/
-
 
 	conn_opened = 0;
 	printf("pp_main on cpu %d, thread self is %x\n", percpu_get(cpu_nr), pthread_self());
