@@ -57,7 +57,7 @@ struct pci_dev *g_nvme_dev[CFG_MAX_NVMEDEV];
 
 RTE_DEFINE_PER_LCORE(int, open_ev[MAX_OPEN_BATCH]);
 RTE_DEFINE_PER_LCORE(int, open_ev_ptr);
-RTE_DEFINE_PER_LCORE(struct spdk_nvme_qpair *, qpair);
+RTE_DEFINE_PER_LCORE(struct spdk_nvme_qpair *, qpair[16]);
 RTE_DEFINE_PER_LCORE(bool, mempool_initialized);
 
 static DEFINE_SPINLOCK(nvme_bitmap_lock);
@@ -122,7 +122,33 @@ int init_global_arrays(void)
 	return 0;
 }
 
-
+//Go through port array to find index that has the desired port. Return nvme_dev_id at index of this found index
+//if successful port id is found, that id is returned, if not, -1 is returned
+//DEBUGGG
+int get_dev_id(int port)
+{
+	/*	
+	int i, j;
+	for(i = 0; i < CFG_MAX_NVMEDEV; i++) {
+		for(j = 0; j < CFG_MAX_PORT_PER_DEV; j++) {
+			int value = CFG.port_to_dev[i][j];
+			if(value == port) 
+				return i;
+			if(value = -1)
+				break;
+		}
+	}
+	return -1;
+	*/
+	int i;
+	for(i = 0; i < CFG_MAX_PORTS; i++) {
+		if(CFG.ports[i] == port) {
+			int ret = CFG.port_to_dev[i];
+			return ret;
+		}
+	}
+	return -1;
+}
 
 struct nvme_ctx * alloc_local_nvme_ctx(void)
 {
@@ -273,7 +299,7 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 	struct spdk_nvme_ns *ns = spdk_nvme_ctrlr_get_ns(ctrlr, 1);
 	
 	bitmap_init(ioq_bitmap, MAX_NUM_IO_QUEUES, 0);
-	nvme_ctrlr[CFG.cpu[global_i++]] = ctrlr;
+	nvme_ctrlr[global_i++] = ctrlr;
 	cdata = spdk_nvme_ctrlr_get_data(ctrlr);
 
 	if (!spdk_nvme_ns_is_active(ns)) {
@@ -373,8 +399,15 @@ int init_nvmeqp_cpu(void)
 	opts.io_queue_size = 1024;
 	opts.io_queue_requests = 4096;
 
-	percpu_get(qpair) = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr[percpu_get(cpu_id)], &opts, sizeof(opts));		
-	assert(percpu_get(qpair));
+	int i;
+	bool end = false;
+	for(i = 0; i < CFG_MAX_PORTS && !end; i++) {
+		int dev_id = percpu_get(dev_array)[i];	
+		printf("DEBUGGG: cpu_id: %d, dev_id: %d\n", percpu_get(cpu_id), dev_id);
+		percpu_get(qpair)[dev_id] = spdk_nvme_ctrlr_alloc_io_qpair(nvme_ctrlr[dev_id], &opts, sizeof(opts));		
+		assert(percpu_get(qpair)[dev_id]);
+		end = percpu_get(dev_array)[i+1] == -1;
+	}
 	
 	return 0;
 }
@@ -539,29 +572,36 @@ nvme_read_cb(void *ctx, const struct spdk_nvme_cpl *cpl)
 
 long bsys_nvme_open(long dev_id, long ns_id)
 {
-	struct spdk_nvme_ns *ns;
-	int ioq;
-	// FIXME: for now, only support 1 namespace
-	if (ns_id != global_ns_id) {
-		panic("ERROR: only support 1 namespace with ns_id = 1, ns_id: %lx\n", ns_id);
-		return -RET_INVAL;
+	//printf("<><><>DEBUGGG: IN BSYS_NVME_OPEN with cpu_id: %d, dev_id: %d, ns_id: %d\n", percpu_get(cpu_id), dev_id, ns_id);
+	int i;
+	bool end = false;
+	for(i = 0; i < CFG_MAX_PORTS && !end; i++) {
+		int dev_id = percpu_get(dev_array)[i];
+		struct spdk_nvme_ns *ns;
+		int ioq;
+		// FIXME: for now, only support 1 namespace
+		if (ns_id != global_ns_id) {
+			panic("ERROR: only support 1 namespace with ns_id = 1, ns_id: %lx\n", ns_id);
+			return -RET_INVAL;
+		}
+		// allocate next available queue 
+		// for now, assume only one bitmap
+		// FIXME: we may want 1 bitmap per device 
+		ioq = allocate_nvme_ioq();
+		if (ioq < 0){
+			return -RET_NOBUFS; 
+		}
+		bitmap_init(nvme_fgs_bitmap, MAX_NVME_FLOW_GROUPS, 0);
+
+		percpu_get(open_ev[percpu_get(open_ev_ptr)++]) = ioq;
+
+		ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[dev_id], ns_id);
+		global_ns_size[dev_id] = spdk_nvme_ns_get_size(ns);
+		global_ns_sector_size[dev_id] = spdk_nvme_ns_get_sector_size(ns);
+		printf("NVMe device namespace size: %lu bytes, sector size: %lu, dev_id: %d, cpu_id: %d\n", spdk_nvme_ns_get_size(ns), spdk_nvme_ns_get_sector_size(ns), dev_id, percpu_get(cpu_id));
+		
+		end = percpu_get(dev_array)[i+1] == -1;
 	}
-	// allocate next available queue 
-	// for now, assume only one bitmap
-	// FIXME: we may want 1 bitmap per device 
-	ioq = allocate_nvme_ioq();
-	if (ioq < 0){
-		return -RET_NOBUFS; 
-	}
-	bitmap_init(nvme_fgs_bitmap, MAX_NVME_FLOW_GROUPS, 0);
-
-	percpu_get(open_ev[percpu_get(open_ev_ptr)++]) = ioq;
-
-	    ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], ns_id);
-	    global_ns_size[percpu_get(cpu_id)] = spdk_nvme_ns_get_size(ns);
-	    global_ns_sector_size[percpu_get(cpu_id)] = spdk_nvme_ns_get_sector_size(ns);
-	    printf("NVMe device namespace size: %lu bytes, sector size: %lu\n", spdk_nvme_ns_get_size(ns), spdk_nvme_ns_get_sector_size(ns));
-
 	return RET_OK;
 }
 
@@ -617,12 +657,17 @@ int set_nvme_flow_group_id(long flow_group_id, long* fg_handle_to_set)
 // adjust token deficit limit to allow LC tenants to burst, but not too much
 static void set_token_deficit_limit(void){
 	printf("DEVICE PARAMS: read cost %d, write cost %d\n", NVME_READ_COST, NVME_WRITE_COST);
-	TOKEN_DEFICIT_LIMIT[percpu_get(cpu_id)] = 100*NVME_WRITE_COST; 
+	int i;
+	bool end = false;
+	for(i = 0; i < CFG_MAX_PORTS && !end; i++) {
+		TOKEN_DEFICIT_LIMIT[percpu_get(dev_array)[i]] = 100*NVME_WRITE_COST; 
+		end = percpu_get(dev_array)[i+1] == -1;
+	}
 }
 
 
 
-static unsigned long find_token_limit_from_devmodel(unsigned int lat_SLO){
+static unsigned long find_token_limit_from_devmodel(unsigned int lat_SLO, int dev_id){
 	int i=0;
 	unsigned long y0, y1, x0, x1;
 	double y;
@@ -633,7 +678,7 @@ static unsigned long find_token_limit_from_devmodel(unsigned int lat_SLO){
 		}	
 	}	
 	if (i > 0){
-		if (global_readonly_flag[percpu_get(cpu_id)]){
+		if (global_readonly_flag[dev_id]){
 			if (i == dev_model_size){
 				return dev_model[i-1].token_rdonly_rate_limit;
 			}
@@ -662,7 +707,7 @@ static unsigned long find_token_limit_from_devmodel(unsigned int lat_SLO){
 		}
 	}
 	printf("WARNING: provide dev model info for latency SLO %d\n", lat_SLO);	
-	if (global_readonly_flag[percpu_get(cpu_id)]){
+	if (global_readonly_flag[dev_id]){
 		return dev_model[0].token_rdonly_rate_limit;
 	}
 	return dev_model[0].token_rate_limit; 
@@ -670,7 +715,7 @@ static unsigned long find_token_limit_from_devmodel(unsigned int lat_SLO){
 }
 
 
-unsigned long lookup_device_token_rate(unsigned int lat_SLO){
+unsigned long lookup_device_token_rate(unsigned int lat_SLO, int dev_id){
 
 	switch (nvme_dev_model) {
 		case DEFAULT_FLASH:
@@ -678,7 +723,7 @@ unsigned long lookup_device_token_rate(unsigned int lat_SLO){
 		case FAKE_FLASH:
 			return UINT_MAX;
 		case FLASH_DEV_MODEL:
-			return find_token_limit_from_devmodel(lat_SLO);
+			return find_token_limit_from_devmodel(lat_SLO, dev_id);
 		default:
 			printf("WARNING: undefined flash device model\n");
 			return UINT_MAX;
@@ -704,14 +749,14 @@ unsigned long scaled_IOPS(unsigned long IOPS, int rw_ratio_100){
 	return (unsigned long) (scaledIOPS + 0.5);
 }
 
-static void readjust_lc_tenant_token_limits(void){
+static void readjust_lc_tenant_token_limits(int dev_id){
 	int i,j = 0;
 	for (i = 0; i < MAX_NVME_FLOW_GROUPS; i++){
 		if (bitmap_test(nvme_fgs_bitmap, i)) {
 			if (nvme_fgs[i].latency_critical_flag) {
-				nvme_fgs[i].scaled_IOPuS_limit = (nvme_fgs[i].scaled_IOPS_limit + global_lc_boost_no_BE[percpu_get(cpu_id)]) / (double) 1E6;
+				nvme_fgs[i].scaled_IOPuS_limit = (nvme_fgs[i].scaled_IOPS_limit + global_lc_boost_no_BE[dev_id]) / (double) 1E6;
 				j++;
-				if (j == global_num_lc_tenants[percpu_get(cpu_id)]){
+				if (j == global_num_lc_tenants[dev_id]){
 					return;
 				}
 			}
@@ -726,19 +771,19 @@ int recalculate_weights_add(long new_flow_group_idx){
 	unsigned long new_global_LC_sum_token_rate = 0;
 	unsigned long lc_token_rate_boost_when_no_BE = 0;
 	unsigned int be_token_rate_per_tenant;
-
+	int dev_id = get_dev_id(nvme_fgs[new_flow_group_idx].flow_group_id);
 
 	spin_lock(&nvme_bitmap_lock);	
 	
 	if (nvme_fgs[new_flow_group_idx].latency_critical_flag) {
-		new_global_LC_sum_token_rate = global_LC_sum_token_rate[percpu_get(cpu_id)] + nvme_fgs[new_flow_group_idx].scaled_IOPS_limit;
+		new_global_LC_sum_token_rate = global_LC_sum_token_rate[dev_id] + nvme_fgs[new_flow_group_idx].scaled_IOPS_limit;
 		if (nvme_fgs[new_flow_group_idx].rw_ratio_SLO < 100){
-			global_readonly_flag[percpu_get(cpu_id)] = false;
+			global_readonly_flag[dev_id] = false;
 		}
 		
-		new_global_token_rate = lookup_device_token_rate(nvme_fgs[new_flow_group_idx].latency_us_SLO);
-		if (new_global_token_rate > global_token_rate[percpu_get(cpu_id)]){
-			new_global_token_rate = global_token_rate[percpu_get(cpu_id)]; // keep limit based on strictest latency SLO
+		new_global_token_rate = lookup_device_token_rate(nvme_fgs[new_flow_group_idx].latency_us_SLO, dev_id);
+		if (new_global_token_rate > global_token_rate[dev_id]){
+			new_global_token_rate = global_token_rate[dev_id]; // keep limit based on strictest latency SLO
 		}
 		
 		if (new_global_LC_sum_token_rate > new_global_token_rate){
@@ -749,32 +794,32 @@ int recalculate_weights_add(long new_flow_group_idx){
 			return -RET_CANTMEETSLO;
 		}
 	
-		global_token_rate[percpu_get(cpu_id)] = new_global_token_rate;
-		global_LC_sum_token_rate[percpu_get(cpu_id)] = new_global_LC_sum_token_rate;
-		printf("Global token rate: %lu tokens/s.\n", global_token_rate[percpu_get(cpu_id)]);
-		global_num_lc_tenants[percpu_get(cpu_id)]++;
+		global_token_rate[dev_id] = new_global_token_rate;
+		global_LC_sum_token_rate[dev_id] = new_global_LC_sum_token_rate;
+		printf("Global token rate: %lu tokens/s.\n", global_token_rate[dev_id]);
+		global_num_lc_tenants[dev_id]++;
 	}
 	else{
-		global_num_best_effort_tenants[percpu_get(cpu_id)]++;
-		global_readonly_flag[percpu_get(cpu_id)] = false; // assume BE tenant has rd/wr mixed workload
+		global_num_best_effort_tenants[dev_id]++;
+		global_readonly_flag[dev_id] = false; // assume BE tenant has rd/wr mixed workload
 	}	
 	
-	if (global_num_best_effort_tenants[percpu_get(cpu_id)]){
-	   	be_token_rate_per_tenant = (global_token_rate[percpu_get(cpu_id)] - global_LC_sum_token_rate[percpu_get(cpu_id)]) / global_num_best_effort_tenants[percpu_get(cpu_id)];
+	if (global_num_best_effort_tenants[dev_id]){
+	   	be_token_rate_per_tenant = (global_token_rate[dev_id] - global_LC_sum_token_rate[dev_id]) / global_num_best_effort_tenants[dev_id];
 		lc_token_rate_boost_when_no_BE = 0;
 	}
 	else{
 		be_token_rate_per_tenant = 0;
-		if (global_num_lc_tenants[percpu_get(cpu_id)])
-			lc_token_rate_boost_when_no_BE = (global_token_rate[percpu_get(cpu_id)] - global_LC_sum_token_rate[percpu_get(cpu_id)]) / global_num_lc_tenants[percpu_get(cpu_id)];
+		if (global_num_lc_tenants[dev_id])
+			lc_token_rate_boost_when_no_BE = (global_token_rate[dev_id] - global_LC_sum_token_rate[dev_id]) / global_num_lc_tenants[dev_id];
 	}
-	atomic_write(&global_be_token_rate_per_tenant[percpu_get(cpu_id)], be_token_rate_per_tenant);
+	atomic_write(&global_be_token_rate_per_tenant[dev_id], be_token_rate_per_tenant);
 	
 	// if number of BE tenants has changes from 0 to 1 or more (or vice versa)
 	// adjust LC tenant boost (only want to boost if no BE tenants registered)
-	if (lc_token_rate_boost_when_no_BE != global_lc_boost_no_BE[percpu_get(cpu_id)]){
-		global_lc_boost_no_BE[percpu_get(cpu_id)] = lc_token_rate_boost_when_no_BE;
-		readjust_lc_tenant_token_limits();
+	if (lc_token_rate_boost_when_no_BE != global_lc_boost_no_BE[dev_id]){
+		global_lc_boost_no_BE[dev_id] = lc_token_rate_boost_when_no_BE;
+		readjust_lc_tenant_token_limits(dev_id);
 	}
 	spin_unlock(&nvme_bitmap_lock);	
 	
@@ -786,13 +831,13 @@ int recalculate_weights_remove(long flow_group_idx){
 	unsigned int strictest_latency_SLO = UINT_MAX;
 	unsigned int be_token_rate_per_tenant;
 	unsigned long lc_token_rate_boost_when_no_BE = 0;
-
+	int dev_id = get_dev_id(nvme_fgs[flow_group_idx].flow_group_id);
 
 	spin_lock(&nvme_bitmap_lock);	
 
 	if (nvme_fgs[flow_group_idx].latency_critical_flag) {
 		//find new strictest latency SLO
-		global_readonly_flag[percpu_get(cpu_id)] = true;
+		global_readonly_flag[dev_id] = true;
 		for (i = 0; i < MAX_NVME_FLOW_GROUPS; i++){
 			if (bitmap_test(nvme_fgs_bitmap, i) && i != flow_group_idx) {
 				if (nvme_fgs[i].latency_critical_flag) {
@@ -800,39 +845,39 @@ int recalculate_weights_remove(long flow_group_idx){
 						strictest_latency_SLO = nvme_fgs[i].latency_us_SLO;
 					}
 					if(nvme_fgs[i].rw_ratio_SLO < 100){
-						global_readonly_flag[percpu_get(cpu_id)] = false;
+						global_readonly_flag[dev_id] = false;
 					}
 				}
 			}
 		}
-		global_LC_sum_token_rate[percpu_get(cpu_id)] -= nvme_fgs[flow_group_idx].scaled_IOPS_limit;
-		global_token_rate[percpu_get(cpu_id)] = lookup_device_token_rate(strictest_latency_SLO);
+		global_LC_sum_token_rate[dev_id] -= nvme_fgs[flow_group_idx].scaled_IOPS_limit;
+		global_token_rate[dev_id] = lookup_device_token_rate(strictest_latency_SLO, dev_id);
 		
-		printf("Global token rate: %lu tokens/s\n", global_token_rate[percpu_get(cpu_id)]);
+		printf("Global token rate: %lu tokens/s\n", global_token_rate[dev_id]);
 
-		global_num_lc_tenants[percpu_get(cpu_id)]--;
+		global_num_lc_tenants[dev_id]--;
 	}
 	else{
-		global_num_best_effort_tenants[percpu_get(cpu_id)]--;
+		global_num_best_effort_tenants[dev_id]--;
 	}	
 	
-	if (global_num_best_effort_tenants[percpu_get(cpu_id)]){
-		global_readonly_flag[percpu_get(cpu_id)] = false;
-	   	be_token_rate_per_tenant = (global_token_rate[percpu_get(cpu_id)] - global_LC_sum_token_rate[percpu_get(cpu_id)]) / global_num_best_effort_tenants[percpu_get(cpu_id)];
+	if (global_num_best_effort_tenants[dev_id]){
+		global_readonly_flag[dev_id] = false;
+	   	be_token_rate_per_tenant = (global_token_rate[dev_id] - global_LC_sum_token_rate[dev_id]) / global_num_best_effort_tenants[dev_id];
 		lc_token_rate_boost_when_no_BE = 0;
 	}
 	else{
 		be_token_rate_per_tenant = 0;
-		if (global_num_lc_tenants[percpu_get(cpu_id)])
-			lc_token_rate_boost_when_no_BE = (global_token_rate[percpu_get(cpu_id)] - global_LC_sum_token_rate[percpu_get(cpu_id)]) / global_num_lc_tenants[percpu_get(cpu_id)];
+		if (global_num_lc_tenants[dev_id])
+			lc_token_rate_boost_when_no_BE = (global_token_rate[dev_id] - global_LC_sum_token_rate[dev_id]) / global_num_lc_tenants[dev_id];
 	}
-	atomic_write(&global_be_token_rate_per_tenant[percpu_get(cpu_id)], be_token_rate_per_tenant);
+	atomic_write(&global_be_token_rate_per_tenant[dev_id], be_token_rate_per_tenant);
 
 	// if number of BE tenants has changes from 0 to 1 or more (or vice versa)
 	// adjust LC tenant boost (only want to boost if no BE tenants registered)
-	if (lc_token_rate_boost_when_no_BE != global_lc_boost_no_BE[percpu_get(cpu_id)]){
-		global_lc_boost_no_BE[percpu_get(cpu_id)] = lc_token_rate_boost_when_no_BE;
-		readjust_lc_tenant_token_limits();
+	if (lc_token_rate_boost_when_no_BE != global_lc_boost_no_BE[dev_id]){
+		global_lc_boost_no_BE[dev_id] = lc_token_rate_boost_when_no_BE;
+		readjust_lc_tenant_token_limits(dev_id);
 	}
 
 	spin_unlock(&nvme_bitmap_lock);	
@@ -891,11 +936,14 @@ long bsys_nvme_register_flow(long flow_group_id, unsigned long cookie,
 
 	if (already_registered_flow == 0){
 		nvme_fg->scaled_IOPuS_limit = nvme_fg->scaled_IOPS_limit / (double) 1E6; 
-		ret = recalculate_weights_add(fg_handle); 
+		
+		ret = recalculate_weights_add(fg_handle);
 		if (ret < 0) {
 			printf("warning: cannot satisfy SLO\n"); 
 			return -RET_CANTMEETSLO;
 		}
+
+
 
 		swq = alloc_local_nvme_swq();
 		if (swq == NULL) {
@@ -986,8 +1034,10 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 	struct nvme_ctx *ctx;
 	void* paddr;
 	int ret;
+	int dst_port = nvme_fgs[fg_handle].flow_group_id; //DEBUGGG
+	int dev_id = get_dev_id(dst_port); //DEBUGGG
 
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], global_ns_id);
+	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[dev_id], global_ns_id);
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
 		printf("ERROR: Cannot allocate memory for nvme_ctx in bsys_nvme_write\n");
@@ -1011,7 +1061,7 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 		ctx->tid = RTE_PER_LCORE(cpu_nr);
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_WRITE;
-		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_WRITE, lba_count * global_ns_sector_size[percpu_get(cpu_id)]);
+		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_WRITE, lba_count * global_ns_sector_size[dev_id]);
 		ctx->ns = ns;
 		ctx->paddr = paddr;
 		ctx->lba = lba;
@@ -1027,7 +1077,7 @@ long bsys_nvme_write(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lo
 		}
 	}
 	else {
-		ret = spdk_nvme_ns_cmd_write(ns, percpu_get(qpair), paddr, lba, lba_count, nvme_write_cb, ctx, 0);
+		ret = spdk_nvme_ns_cmd_write(ns, percpu_get(qpair)[dev_id], paddr, lba, lba_count, nvme_write_cb, ctx, 0);
 		if(ret != 0)
 			printf("NVME Write ret: %lx\n", ret);
 		assert(ret == 0);
@@ -1045,7 +1095,10 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	unsigned int ns_sector_size;
 	int ret;
 	
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], global_ns_id);
+        int dst_port = nvme_fgs[fg_handle].flow_group_id; //DEBUGGG
+        int dev_id = get_dev_id(dst_port); //DEBUGGG
+
+	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[dev_id], global_ns_id);
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
@@ -1071,7 +1124,7 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 		ctx->tid = RTE_PER_LCORE(cpu_nr);
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_READ;
-		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_READ, lba_count * global_ns_sector_size[percpu_get(cpu_id)]);
+		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_READ, lba_count * global_ns_sector_size[dev_id]);
 		ctx->ns = ns;
 		ctx->paddr = paddr;
 		ctx->lba = lba;
@@ -1087,7 +1140,7 @@ long bsys_nvme_read(hqu_t fg_handle, void __user *__restrict vaddr, unsigned lon
 	}
 	else {
 		assert(((lba / lba_count) * lba_count) == lba);
-		ret = spdk_nvme_ns_cmd_read(ns, percpu_get(qpair), paddr, lba, lba_count, nvme_read_cb, ctx, 0);
+		ret = spdk_nvme_ns_cmd_read(ns, percpu_get(qpair)[dev_id], paddr, lba, lba_count, nvme_read_cb, ctx, 0);
 		if(ret != 0)
 			printf("NVME Read ret: %lx\n", ret);
 		assert(ret == 0);
@@ -1144,8 +1197,11 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 	struct spdk_nvme_ns *ns;
 	struct nvme_ctx *ctx;
 	int ret;
+
+        int dst_port = nvme_fgs[fg_handle].flow_group_id; //DEBUGGG
+        int dev_id = get_dev_id(dst_port); //DEBUGGG
 	
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], global_ns_id);
+	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[dev_id], global_ns_id);
 	
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
@@ -1161,7 +1217,7 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 		ctx->tid = percpu_get(cpu_nr);
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_WRITE;
-		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_WRITE, lba_count * global_ns_sector_size[percpu_get(cpu_id)]);
+		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_WRITE, lba_count * global_ns_sector_size[dev_id]);
 		ctx->ns = ns;
 		ctx->lba = lba;
 		ctx->lba_count = lba_count;
@@ -1175,7 +1231,7 @@ long bsys_nvme_writev(hqu_t fg_handle, void __user **__restrict buf, int num_sgl
 		}
 	}
 	else {
-		ret = spdk_nvme_ns_cmd_writev(ns, percpu_get(qpair), lba, lba_count,
+		ret = spdk_nvme_ns_cmd_writev(ns, percpu_get(qpair)[dev_id], lba, lba_count,
 									  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		if(ret != 0)
 			printf("Writev failed: %lx %lx %lx\n", ret, num_sgls, lba_count);
@@ -1192,8 +1248,11 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 	struct spdk_nvme_ns *ns;
 	struct nvme_ctx *ctx;
 	int ret;
+
+        int dst_port = nvme_fgs[fg_handle].flow_group_id; //DEBUGGG
+        int dev_id = get_dev_id(dst_port); //DEBUGGG
 	
-	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[percpu_get(cpu_id)], global_ns_id);
+	ns = spdk_nvme_ctrlr_get_ns(nvme_ctrlr[dev_id], global_ns_id);
 
 	ctx = alloc_local_nvme_ctx();
 	if (ctx == NULL) {
@@ -1209,7 +1268,7 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 		ctx->tid = RTE_PER_LCORE(cpu_nr);
 		ctx->fg_handle = fg_handle; 
 		ctx->cmd = NVME_CMD_READ;
-		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_READ, lba_count * global_ns_sector_size[percpu_get(cpu_id)]);
+		ctx->req_cost = nvme_compute_req_cost(NVME_CMD_READ, lba_count * global_ns_sector_size[dev_id]);
 		ctx->ns = ns;
 		ctx->lba = lba;
 		ctx->lba_count = lba_count;
@@ -1224,7 +1283,7 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 		}
 	}
 	else {
-		ret = spdk_nvme_ns_cmd_readv(ns, percpu_get(qpair), lba, lba_count,
+		ret = spdk_nvme_ns_cmd_readv(ns, percpu_get(qpair)[dev_id], lba, lba_count,
 									 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		if(ret != 0)
 			printf("Readv failed: %lx %lx %lx\n", ret, num_sgls, lba_count);
@@ -1234,22 +1293,22 @@ long bsys_nvme_readv(hqu_t fg_handle, void __user **__restrict buf, int num_sgls
 	return RET_OK;
 }
 
-unsigned long try_acquire_global_tokens(unsigned long token_demand) {
+unsigned long try_acquire_global_tokens(unsigned long token_demand, int dev_id) {
 	unsigned long new_token_level = 0;
 	unsigned long avail_tokens = 0;
 
 	while (1) {
-		avail_tokens = atomic_u64_read(&global_leftover_tokens[percpu_get(cpu_id)]);
+		avail_tokens = atomic_u64_read(&global_leftover_tokens[dev_id]);
 
 		if (token_demand > avail_tokens) {
-			if (atomic_u64_cmpxchg(&global_leftover_tokens[percpu_get(cpu_id)], avail_tokens, 0)){
+			if (atomic_u64_cmpxchg(&global_leftover_tokens[dev_id], avail_tokens, 0)){
 				return avail_tokens;
 			}
 
 		}
 		else {
 			new_token_level = avail_tokens - token_demand;
-			if (atomic_u64_cmpxchg(&global_leftover_tokens[percpu_get(cpu_id)], avail_tokens, new_token_level)){
+			if (atomic_u64_cmpxchg(&global_leftover_tokens[dev_id], avail_tokens, new_token_level)){
 				return token_demand;
 			}
 		}
@@ -1259,7 +1318,7 @@ unsigned long try_acquire_global_tokens(unsigned long token_demand) {
 static void issue_nvme_req(struct nvme_ctx* ctx)
 {
 	int ret;
-
+	int dev_id = get_dev_id(nvme_fgs[ctx->fg_handle].flow_group_id);
 	//don't schedule request on flash if FAKE_FLASH test	
 	if (nvme_dev_model == FAKE_FLASH) {
 		if (ctx->cmd == NVME_CMD_READ) {
@@ -1279,15 +1338,15 @@ static void issue_nvme_req(struct nvme_ctx* ctx)
 		// if PRP:
 		//ret = spdk_nvme_ns_cmd_read(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_read_cb, ctx, 0);
 		// for SGL:
-		ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
+		ret = spdk_nvme_ns_cmd_readv(ctx->ns, percpu_get(qpair)[dev_id], ctx->lba, ctx->lba_count,
 									 nvme_read_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
-		
+		printf("DEBUGGG: dev_id: %d\n", dev_id);
 	}
 	else if (ctx->cmd == NVME_CMD_WRITE) {
 		// if PRP:
 		//ret = spdk_nvme_ns_cmd_write(ctx->ns, percpu_get(qpair), ctx->paddr, ctx->lba, ctx->lba_count, nvme_write_cb, ctx, 0);
 		// for SGL:
-		ret = spdk_nvme_ns_cmd_writev(ctx->ns, percpu_get(qpair), ctx->lba, ctx->lba_count,
+		ret = spdk_nvme_ns_cmd_writev(ctx->ns, percpu_get(qpair)[dev_id], ctx->lba, ctx->lba_count,
 									  nvme_write_cb, ctx, 0, sgl_reset_cb, sgl_next_cb);
 		
 	}
@@ -1304,7 +1363,7 @@ static void issue_nvme_req(struct nvme_ctx* ctx)
 /*
  * nvme_sched_subround1: schedule latency critical tenant traffic 
  */
-static inline int nvme_sched_subround1(void)
+static inline int nvme_sched_subround1(int dev_id)
 {
 	struct nvme_tenant_mgmt* thread_tenant_manager;
 	struct nvme_sw_queue* nvme_swq;
@@ -1331,7 +1390,7 @@ static inline int nvme_sched_subround1(void)
 			
 			token_increment = (nvme_fgs[nvme_swq->fg_handle].scaled_IOPuS_limit * time_delta) + 0.5; // 0.5 is for rounding
 			nvme_swq->token_credit += (long) token_increment;
-			if (nvme_swq->token_credit < -TOKEN_DEFICIT_LIMIT[percpu_get(cpu_id)]){
+			if (nvme_swq->token_credit < -TOKEN_DEFICIT_LIMIT[dev_id]){
 				/*
 				 * Notify control plane, may need to re-negotiate tenant SLO
 				 * FUTURE WORK: implement control plane
@@ -1341,7 +1400,7 @@ static inline int nvme_sched_subround1(void)
 				//NOTE: may also need to schedule LC tenants in round robin for fairness
 			}
 			while (nvme_sw_queue_isempty(nvme_swq) == 0 && 
-				   nvme_swq->token_credit > -TOKEN_DEFICIT_LIMIT[percpu_get(cpu_id)]) {
+				   nvme_swq->token_credit > -TOKEN_DEFICIT_LIMIT[dev_id]) {
 				nvme_sw_queue_pop_front(nvme_swq, &ctx); 
 				issue_nvme_req(ctx);
 				nvme_swq->token_credit -= ctx->req_cost;
@@ -1382,7 +1441,7 @@ static inline int nvme_sched_subround1(void)
 /*
  * nvme_sched_subround2: schedule best-effort tenant traffic 
  */
-static inline void nvme_sched_subround2(void)
+static inline void nvme_sched_subround2(int dev_id)
 {
 	struct nvme_tenant_mgmt* thread_tenant_manager;
 	struct nvme_sw_queue* nvme_swq;
@@ -1406,12 +1465,12 @@ static inline void nvme_sched_subround2(void)
 	// compare local leftover with local demand 
 	// synchronize access to global token bucket
 	if (local_leftover > 0 && local_demand == 0) { //give away leftoever tokens to global pool
-		atomic_u64_fetch_and_add(&global_leftover_tokens[percpu_get(cpu_id)], local_leftover);
+		atomic_u64_fetch_and_add(&global_leftover_tokens[dev_id], local_leftover);
 		return;
 	}
 	else if (local_leftover < local_demand) { //try to get how much you need from global pool
 		token_demand = local_demand - local_leftover;
-		global_tokens_acquired = try_acquire_global_tokens(token_demand); // atomic 
+		global_tokens_acquired = try_acquire_global_tokens(token_demand, dev_id); // atomic 
 		be_tokens = local_leftover + global_tokens_acquired;
 	}
 	else if (local_leftover >= local_demand) {
@@ -1432,7 +1491,7 @@ static inline void nvme_sched_subround2(void)
 		}
 		if (!nvme_fgs[nvme_swq->fg_handle].latency_critical_flag){ 
 			be_tokens += nvme_sw_queue_take_saved_tokens(nvme_swq); 
-			token_increment = (atomic_read(&global_be_token_rate_per_tenant[percpu_get(cpu_id)]) * time_delta_cycles) / (double) (cycles_per_us * 1E6);
+			token_increment = (atomic_read(&global_be_token_rate_per_tenant[dev_id]) * time_delta_cycles) / (double) (cycles_per_us * 1E6);
 			be_tokens += (long) (token_increment + 0.5);
 					
 			while ( (nvme_sw_queue_isempty(nvme_swq) == 0) && 
@@ -1457,7 +1516,7 @@ static inline void nvme_sched_subround2(void)
 		log_debug("subround2: sched tenant handle %ld, tenant_tokens %lu\n", nvme_swq->fg_handle, tenant_tokens);
 		if (!nvme_fgs[nvme_swq->fg_handle].latency_critical_flag){		
 			be_tokens += nvme_sw_queue_take_saved_tokens(nvme_swq); 
-			token_increment = (atomic_read(&global_be_token_rate_per_tenant[percpu_get(cpu_id)]) * time_delta_cycles) / (double) (cycles_per_us * 1E6);
+			token_increment = (atomic_read(&global_be_token_rate_per_tenant[dev_id]) * time_delta_cycles) / (double) (cycles_per_us * 1E6);
 			be_tokens += (long) (token_increment + 0.5);
 			
 			while ( (nvme_sw_queue_isempty(nvme_swq) == 0) && 
@@ -1495,7 +1554,7 @@ static inline void nvme_sched_subround2(void)
 	}
 	
 	if (be_tokens > 0){
-		atomic_u64_fetch_and_add(&global_leftover_tokens[percpu_get(cpu_id)], be_tokens);
+		atomic_u64_fetch_and_add(&global_leftover_tokens[dev_id], be_tokens);
 	}
 
 }
@@ -1509,7 +1568,7 @@ static inline void nvme_sched_subround2(void)
  * 		  and the exact timing of token bucket reset is not critical, as long as we reset approximately
  * 		  after each thread has had a chance to get tokens  
  */
-static void update_scheduled_bitvector(void){
+static void update_scheduled_bitvector(int dev_id){
 	
 	int i;
 	scheduled_bit_vector[RTE_PER_LCORE(cpu_nr)]++;
@@ -1519,7 +1578,7 @@ static void update_scheduled_bitvector(void){
 			break;
 	}
 	if (i == cpus_active){ // all other threads scheduled at least once
-		atomic_u64_write(&global_leftover_tokens[percpu_get(cpu_id)], 0);
+		atomic_u64_write(&global_leftover_tokens[dev_id], 0);
 		
 		//clear scheduled bit vector
 		for (i = 0; i < cpus_active; i++) {
@@ -1540,35 +1599,56 @@ int nvme_sched(void)
 	if (thread_tenant_manager->num_tenants == 0) { 
 		percpu_get(last_sched_time) = timer_now();
 		percpu_get(last_sched_time_be) = rdtsc();
-		update_scheduled_bitvector(); 
+
+		int i;
+		bool end = false;
+		for(i = 0; i < 	CFG_MAX_PORTS && !end; i++) {
+			int dev_id = percpu_get(dev_array)[i];
+			update_scheduled_bitvector(dev_id);
+			end = percpu_get(dev_array)[i+1] == -1;
+		} 
+
 		return 0;
 	}
 
-	nvme_sched_subround1(); // serve latency-critical tenants
-	nvme_sched_subround2(); // serve best-effort tenants
-	
+	int i;
+	bool end = false;
+	for(i = 0; i < CFG_MAX_PORTS && !end; i++) {
+		int dev_id = RTE_PER_LCORE(dev_array)[i];
+		nvme_sched_subround1(dev_id); // serve latency-critical tenants
+		nvme_sched_subround2(dev_id); // serve best-effort tenants
+		end = RTE_PER_LCORE(dev_array)[i] == -1;
+		update_scheduled_bitvector(dev_id);
+	}	
+
 	percpu_get(local_leftover_tokens) = 0;
 	percpu_get(local_extra_demand) = 0;
 
-	update_scheduled_bitvector(); 
+	//update_scheduled_bitvector(); 
 
 	return 0;
 }
 
 void nvme_process_completions()
 {
-	int i;
-	int max_completions = 4096;
+	int j;
+	bool end = false;
+	for(j = 0; j < CFG_MAX_PORTS && !end; j++) {
+		int i;
+		int max_completions = 4096;
+		int dev_id = percpu_get(dev_array)[j];
 
-	if (CFG.num_nvmedev == 0)
-		return;
+		if (CFG.num_nvmedev == 0)
+			return;
 
-	for(i = 0; i < percpu_get(open_ev_ptr); i++) {
-		usys_nvme_opened(percpu_get(open_ev[i]), global_ns_size[percpu_get(cpu_id)], global_ns_sector_size[percpu_get(cpu_id)]);
-		percpu_get(received_nvme_completions)++;
-	}
-	percpu_get(open_ev_ptr) = 0;
-	percpu_get(received_nvme_completions) +=
-		spdk_nvme_qpair_process_completions(percpu_get(qpair),
+		for(i = 0; i < percpu_get(open_ev_ptr); i++) {
+			usys_nvme_opened(percpu_get(open_ev[i]), global_ns_size[dev_id], global_ns_sector_size[dev_id]);
+			percpu_get(received_nvme_completions)++;
+		}
+		percpu_get(open_ev_ptr) = 0;
+		percpu_get(received_nvme_completions) +=
+			spdk_nvme_qpair_process_completions(percpu_get(qpair)[dev_id],
 						    max_completions);
+		end = percpu_get(dev_array)[j+1] == -1;
+	}
 }

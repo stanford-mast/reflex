@@ -84,6 +84,7 @@ RTE_DEFINE_PER_LCORE(unsigned int, cpu_numa_node);
 RTE_DEFINE_PER_LCORE(unsigned int, cpu_id);
 RTE_DEFINE_PER_LCORE(unsigned int, cpu_nr);
 RTE_DEFINE_PER_LCORE(unsigned int, queue_id);
+RTE_DEFINE_PER_LCORE(unsigned int, dev_array[16]);
 
 void *percpu_offsets[NCPU];
 

@@ -62,10 +62,10 @@
 #include <net/ethernet.h>
 
 
-#define CFG_MAX_PORTS    16
-#define CFG_MAX_CPU     128
-#define CFG_MAX_ETHDEV   16
-#define CFG_MAX_NVMEDEV   6
+#define CFG_MAX_PORTS       16
+#define CFG_MAX_CPU        128
+#define CFG_MAX_ETHDEV      16
+#define CFG_MAX_NVMEDEV      6
 
 enum dev_types {
 	ETH_DEV,
@@ -90,10 +90,10 @@ struct cfg_parameters {
 
 	struct eth_addr mac;
 
-    int num_process; 
+	int num_process; 
 	int num_cpus;
 
-    int queue_id;
+	int queue_id;
 
 	unsigned int cpu[CFG_MAX_CPU];
 
@@ -105,6 +105,8 @@ struct cfg_parameters {
 
 	int num_ports;
 	uint16_t ports[CFG_MAX_PORTS];
+	int port_to_dev[CFG_MAX_PORTS]; //DEBUGGG
+	int port_to_cpu[CFG_MAX_PORTS]; //DEBUGGG
 
 	char loader_path[256];
 };

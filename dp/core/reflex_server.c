@@ -636,6 +636,7 @@ void *pp_main(void *arg)
 {
 	int ret;
 
+	/*
 	//DEBUGGG start
 	struct rte_eth_rss_conf rss_conf;
         ret = rte_eth_dev_rss_hash_conf_get(0, &rss_conf);
@@ -645,7 +646,7 @@ void *pp_main(void *arg)
 	ret = rte_eth_dev_rss_hash_conf_get(0, &rss_conf);
 	printf("DEBUGGG: ETH_RSS_IPV4: %ld, hf: %ld\n", ETH_RSS_IPV4, rss_conf.rss_hf);
 	//DEBUGGG end
-	
+	*/
 
 
 	conn_opened = 0;
