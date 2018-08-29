@@ -131,22 +131,8 @@ static void ip_input(struct eth_fg *cur_fg, struct rte_mbuf *pkt, struct ip_hdr 
 
 	switch (hdr->proto) {
 	case IPPROTO_TCP:
-		// CE_DEBUG.
-		;
-		char src_addr_str[64];
-		struct ip_addr src;
-		src.addr = hton32((hdr->src_addr).addr);
-		ip_addr_to_str(&src, src_addr_str);
-		char dst_addr_str[64];
-		struct ip_addr dst;
-		dst.addr = hton32((hdr->dst_addr).addr);
-		ip_addr_to_str(&dst, dst_addr_str);
-
-		//printf("___________________________________________________________________\n");
-		//printf("CE_DEBUG: Received Packet:\n\tsrc: %s, dst: %s\n", src_addr_str, dst_addr_str);
 		/* FIXME: change when we integrate better with LWIP */
 		tcp_input_tmp(cur_fg, pkt, hdr, mbuf_nextd_off(hdr, void *, hdrlen));
-		break;
 		break;
 	case IPPROTO_ICMP:
 		icmp_input(cur_fg, pkt,										
@@ -296,7 +282,6 @@ int ip_send_one(struct eth_fg *cur_fg, struct ip_addr *dst_addr, struct rte_mbuf
 
 	ret = arp_lookup_mac(&dst_addr_, &ethhdr->dhost);
 	if (unlikely(ret)) {
-		printf("CE_DEBUG: THE UNLIKELY OCCURRED, ret = %d, EAGAIN = %d\n", ret, EAGAIN);
 		arp_add_pending_pkt(&dst_addr_, cur_fg, pkt, len);
 		return 0;
 	}

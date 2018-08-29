@@ -406,7 +406,7 @@ done_tcp_input:
            end. We then call the error callback to inform the
            application that the connection is dead before we
            deallocate the PCB. */
-        TCP_EVENT_ERR(pcb->errf, pcb->callback_arg, ERR_RST);
+	TCP_EVENT_ERR(pcb->errf, pcb->callback_arg, ERR_RST);
         tcp_pcb_remove(cur_fg,pcb);
         memp_free(MEMP_TCP_PCB, pcb);
       } else if (lwip_context.recv_flags & TF_CLOSED) {
@@ -438,7 +438,6 @@ done_tcp_input:
           {
             acked = pcb->acked;
 #endif
-	    //printf("CE_DEBUG: Encountered TCP_EVENT_SENT,\n");
             TCP_EVENT_SENT(pcb, (u16_t)acked, err);
             if (err == ERR_ABRT) {
               goto aborted;
@@ -558,7 +557,6 @@ aborted:
 
 dropped:
 
-	printf("CE_DEBUG: Packet dropped in tcp_input().\n");
 
   TCP_STATS_INC(tcp.drop);
   snmp_inc_tcpinerrs();

@@ -349,7 +349,6 @@ ssize_t ixev_recv(struct ixev_ctx *ctx, void *buf, size_t len)
 		return -EIO;
 
 	while (ctx->recv_head != ctx->recv_tail) {
-		//printf("CE_DEBUG: \tInside ixev_recv while loop.\n");
 		struct sg_entry *ent =
 			&ctx->recv[ctx->recv_head & (IXEV_RECV_DEPTH - 1)];
 		size_t left = len - pos;

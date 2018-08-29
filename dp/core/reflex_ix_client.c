@@ -105,7 +105,7 @@ static const unsigned long sweep[NUM_TESTS] = {1000, 10000, 25000, 30000, //1000
 //static int ns_sector_size = 512;
 static int ns_sector_size = 4096;
 //fixme: hard-coding namespace size for device tested
-static long ns_size = 0x5dc0000;
+static long ns_size = 0x5dc0000000;	// Google Cloud Scratch SSD
 //static long ns_size = 0x1749a956000;    // Samsung 1725 
 // static long ns_size = 0x5d27216000;  // Intel P3600 400GB capacity 
 
@@ -550,9 +550,8 @@ void send_handler(void * arg, int num_req)
 			req->lba = conn->seq_count;
 			assert (req->lba < ns_size / ns_sector_size);
 
-			//printf("CE_DEBUG: TRACKING FPE: %lu, %lu, %lu, %lu\n", req->lba, ns_size, ns_sector_size, req_size);
 
-			//CE_DEBUG: Commented out for now
+			// Commented out for now
 			//if ((req->lba % (((ns_size / ns_sector_size) / req_size)/ 100)) == 0)
 			//	printf("lba %lu %lu %lu\n", req->lba, NUM_MEASURE, ns_size / ns_sector_size);
 		}

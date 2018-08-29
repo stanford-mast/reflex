@@ -154,7 +154,6 @@ static void send_completed_cb(struct ixev_ref *ref)
  */
 int send_req(struct nvme_req *req) 
 {
-	//printf("CE_DEBUG: In send_req() *note this function has branching*\n");
 	struct pp_conn *conn = req->conn;
 	int ret = 0;
 	BINARY_HEADER *header;
@@ -172,7 +171,6 @@ int send_req(struct nvme_req *req)
 		else
 			header->lba_count = req->lba_count;
 		header->req_handle = req->remote_req_handle;
-		//printf("CE_DEBUG: setting up header, size = %u\n", header->magic + header->lba_count * 512);
 
 		assert(header->req_handle); 
 
@@ -384,7 +382,6 @@ static void receive_req(struct pp_conn *conn)
 			if(conn->rx_received < sizeof(BINARY_HEADER))
 				return;
 	
-			//printf("CE_DEBUG: RECEIVED HEADER FROM CLIENT **********\n");		
 			//received the header
 			conn->current_req = mempool_alloc(&nvme_req_pool);
 			if (!conn->current_req) {
@@ -427,10 +424,7 @@ static void receive_req(struct pp_conn *conn)
 		assert(header->magic == sizeof(BINARY_HEADER));
 	
 		if (header->opcode == CMD_SET) {
-			//printf("CE_DEBUG: Entering CMD_SET while loop.\n");
 			while (conn->rx_received < header->lba_count * ns_sector_size) {
-				//printf("CE_DEBUG: at loop start.\n");
-				//printf("CE_DEBUG: \t rx_received = %d, target = %d lba count = %d.\n", conn->rx_received, header->lba_count * ns_sector_size, header->lba_count);	
 				int to_receive = min(PAGE_SIZE - (conn->rx_received % PAGE_SIZE),
 						  (header->lba_count * ns_sector_size) - conn->rx_received);
 				
@@ -440,7 +434,6 @@ static void receive_req(struct pp_conn *conn)
 				
 				if (ret < 0) {
 					if (ret == -EAGAIN) {
-						//printf("CE_DEBUG: \tixev_recv returned -EAGAIN\n");
 						return;
 				}
 					
@@ -455,7 +448,6 @@ static void receive_req(struct pp_conn *conn)
 				if ((conn->rx_received % PAGE_SIZE) == 0){
 					req->current_sgl_buf++;
 				}
-				//printf("CE_DEBUG: at loop end.\n");
 			}
 			//4KB sgl bufs should match number of 512B sectors
 			assert(req->current_sgl_buf <= header->lba_count * 8);
@@ -467,7 +459,6 @@ static void receive_req(struct pp_conn *conn)
 			ixev_close(&conn->ctx);
 			return;
 		}
-		//printf("CE_DEBUG: recieved FULL req %d !!!!!!!!!!!!!!!!!!!!!!!!!11\n", header->opcode);	
 
 		req->opcode = header->opcode;
 		req->lba_count = header->lba_count;

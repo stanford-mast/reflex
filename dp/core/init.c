@@ -167,7 +167,7 @@ static struct rte_eth_conf default_eth_conf = {
 		.header_split   = 0, /**< Header Split disabled */
 		.hw_ip_checksum = 0, /**< IP checksum offload disabled */
 		.hw_vlan_filter = 0, /**< VLAN filtering disabled */
-		.hw_vlan_strip	= 1, //CE_DEBUG: ENABLE VLAN STRIPPING
+		.hw_vlan_strip	= 1, /**< VLAN stripping enabled */
 		//.jumbo_frame	= 1, /**< Jumbo Frame Support disabled */
 		.jumbo_frame	= 0, /**< Jumbo Frame Support disabled */
 		.hw_strip_crc   = 1, /**< CRC stripped by hardware */
@@ -276,7 +276,6 @@ static void init_port(uint8_t port_id, struct eth_addr *mac_addr)
 	}
 	
 	rte_eth_dev_get_mtu(port_id, &mtu);
-	printf("CE_DEBUG: MTU SIZE: %d\n", mtu);
 
 	// initialize one queue per cpu
 	int i;
