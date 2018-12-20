@@ -57,6 +57,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <netinet/in.h>
+#include <fcntl.h>
 
 #include <ixev.h>
 #include <ixev_timer.h>
@@ -88,6 +89,8 @@ unsigned long start_time;
 
 #define MAX_NUM_CONTIG_ALLOC_RETRIES 5
 
+#define CONTROLLER_STAT_SEC_INTERVAL 1 //how frequently to send stats to ctrl (in sec)
+
 static int outstanding_reqs = 4096 * 64; 
 static int outstanding_req_bufs = 4096 * 64; //4096 * 64;
 static unsigned long ns_size;
@@ -100,6 +103,10 @@ static struct mempool_datastore nvme_req_datastore;
 static __thread struct mempool nvme_req_pool;
 static __thread int conn_opened;
 static __thread long reqs_allocated = 0;
+
+// Connection for communication with Pocket controller
+struct pp_conn *ctrl_conn;
+struct ip_tuple ctrl_ip_tuple;
 
 struct nvme_req {
 	struct ixev_nvme_req_ctx ctx;
@@ -141,6 +148,7 @@ static __thread hqu_t handle;
 
 
 static void pp_main_handler(struct ixev_ctx *ctx, unsigned int reason);
+static void ctrl_main_handler(struct ixev_ctx *ctx, unsigned int reason);
 
 static void send_completed_cb(struct ixev_ref *ref)
 {
@@ -614,9 +622,40 @@ static void pp_release(struct ixev_ctx *ctx)
 	mempool_free(&pp_conn_pool, conn);
 }
 
+static void pp_dialed(struct ixev_ctx *ctx, long ret)
+{
+	struct pp_conn *conn = container_of(ctx, struct pp_conn, ctx);	
+	unsigned long now = rdtsc();
+	
+	ixev_set_handler(&conn->ctx, IXEVIN | IXEVOUT | IXEVHUP, &ctrl_main_handler);
+	
+	conn_opened++;
+
+	while(rdtsc() < now + 1500000) {} 
+	printf("Dialed\n");	
+	return; 
+}
+
+
+static void ctrl_main_handler(struct ixev_ctx *ctx, unsigned int reason)
+{
+	struct pp_conn *conn = container_of(ctx, struct pp_conn, ctx);
+	
+	//if(reason == IXEVOUT) {
+	//	ctrl_send_pending_client_reqs(conn);
+	//}
+	if(reason == IXEVHUP) {
+		printf("Ctrl connection closing\n");
+		ixev_close(ctx);
+		return;
+	}
+	//ctrl_receive_req(conn); //TODO: check if need to process ctrl ACKS?
+}
+
 static struct ixev_conn_ops pp_conn_ops = {
 	.accept		= &pp_accept,
 	.release	= &pp_release,
+	.dialed		= &pp_dialed,
 };
 
 
@@ -633,6 +672,7 @@ static struct launch_req *launch_reqs;
 void *pp_main(void *arg)
 {
 	int ret;
+	int flags;
 	conn_opened = 0;
 	printf("pp_main on cpu %d, thread self is %x\n", percpu_get(cpu_nr),pthread_self());
 	struct launch_req *req;
@@ -664,8 +704,46 @@ void *pp_main(void *arg)
 	}
 
 	ixev_nvme_open(NAMESPACE, 1);
+
+	// Create conn that will use to send stats to Pocket controller
+	ctrl_conn = mempool_alloc(&pp_conn_pool);
+	if (!ctrl_conn) {
+		printf("MEMPOOL ALLOC FAILED !\n");
+		return NULL;
+	}
+	
+	list_head_init(&ctrl_conn->pending_requests);
+	ctrl_conn->rx_received = 0;
+	ctrl_conn->rx_pending = false;
+	ctrl_conn->tx_sent = 0;
+	ctrl_conn->tx_pending = false;
+	ctrl_conn->in_flight_pkts = 0x0UL;
+	ctrl_conn->sent_pkts = 0x0UL;
+	ctrl_conn->list_len = 0x0UL;
+	
+	ixev_ctx_init(&ctrl_conn->ctx);
+	
+	ctrl_conn->nvme_fg_handle = 0; //set to this for now
+
+	flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+	fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+
+	ctrl_ip_tuple.dst_ip = 167849906; // 10.1.47.178 -- this is hardcoded for now!
+	ctrl_ip_tuple.dst_port = 1235;
+	ctrl_ip_tuple.src_port = 2345;
+	printf("Dial controller...\n");
+	ixev_dial(&ctrl_conn->ctx, &ctrl_ip_tuple);
+	// TODO SEND??
+
 	while (1) {
 		ixev_wait();
+		unsigned long now = rdtsc();
+		unsigned long time_elapsed = (now-start_time)/cycles_per_us;
+		if (time_elapsed >= CONTROLLER_STAT_SEC_INTERVAL * 1000000) {
+			//printf("send stat: %d, %d\n", util_per_sec->rxbytes, util_per_sec->txbytes);
+            		struct util *u = list_tail(util_list, struct util, link);
+			printf("send stat: %d, %d\n", u->rxbytes, u->txbytes);
+		}
 	}
 
 	return NULL;
