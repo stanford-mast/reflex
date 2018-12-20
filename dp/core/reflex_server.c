@@ -63,6 +63,7 @@
 #include <ixev_timer.h>
 #include <ix/mempool.h>
 #include <ix/list.h>
+#include <ix/cfg.h>
 
 #include "reflex.h" 
 
@@ -81,6 +82,7 @@ unsigned long start_time;
 #define NAMESPACE 0
 
 #define BINARY_HEADER binary_header_blk_t
+#define CTRL_MSG_HEADER ctrl_msg_header_t
 
 #define NVME_ENABLE
 
@@ -90,6 +92,7 @@ unsigned long start_time;
 #define MAX_NUM_CONTIG_ALLOC_RETRIES 5
 
 #define CONTROLLER_STAT_SEC_INTERVAL 1 //how frequently to send stats to ctrl (in sec)
+#define UTIL_STAT_CMD 15
 
 static int outstanding_reqs = 4096 * 64; 
 static int outstanding_req_bufs = 4096 * 64; //4096 * 64;
@@ -103,10 +106,6 @@ static struct mempool_datastore nvme_req_datastore;
 static __thread struct mempool nvme_req_pool;
 static __thread int conn_opened;
 static __thread long reqs_allocated = 0;
-
-// Connection for communication with Pocket controller
-struct pp_conn *ctrl_conn;
-struct ip_tuple ctrl_ip_tuple;
 
 struct nvme_req {
 	struct ixev_nvme_req_ctx ctx;
@@ -141,6 +140,26 @@ struct pp_conn {
 };
 
 
+struct controller_conn {
+	struct ixev_ctx ctx;
+	size_t rx_received; //the amount of data received/sent for the current request
+	size_t tx_sent;
+	bool rx_pending; 	//is there a req currently being received/sent
+	bool tx_pending;
+	long in_flight_pkts;
+	long sent_pkts;
+	long list_len;
+	unsigned long req_received;
+	struct list_head pending_requests;
+	//struct nvme_req *current_req;
+	char data_send[sizeof(CTRL_MSG_HEADER)]; //use zero-copy for payload
+	//char data_recv[sizeof(CTRL_MSG_HEADER)]; //use zero-copy for payload
+};
+
+// Connection for communication with Pocket controller
+struct controller_conn *ctrl_conn;
+struct ip_tuple ctrl_ip_tuple;
+
 static struct mempool_datastore pp_conn_datastore;
 static __thread struct mempool pp_conn_pool;
 
@@ -149,6 +168,22 @@ static __thread hqu_t handle;
 
 static void pp_main_handler(struct ixev_ctx *ctx, unsigned int reason);
 static void ctrl_main_handler(struct ixev_ctx *ctx, unsigned int reason);
+
+#define MAKE_IP_ADDR(a, b, c, d)			\
+	(((uint32_t) a << 24) | ((uint32_t) b << 16) |	\
+	 ((uint32_t) c << 8) | (uint32_t) d)
+
+static int parse_ip_addr(const char *str, uint32_t *addr)
+{
+	unsigned char a, b, c, d;
+
+	if (sscanf(str, "%hhu.%hhu.%hhu.%hhu", &a, &b, &c, &d) != 4)
+		return -EINVAL;
+
+	*addr = MAKE_IP_ADDR(a, b, c, d);
+	return 0;
+}
+
 
 static void send_completed_cb(struct ixev_ref *ref)
 {
@@ -669,6 +704,48 @@ struct launch_req {
 
 static struct launch_req *launch_reqs;
 
+void send_ctrl_stats(void) {
+	CTRL_MSG_HEADER *header;
+	int ret;
+	char *ip = NULL;
+
+	header = (CTRL_MSG_HEADER *) &ctrl_conn->data_send[0];
+        header->msglen = sizeof(CTRL_MSG_HEADER); //note: adjust this if move to multi-core cpu util
+	header->ticket = rdtsc();
+	header->util_stat_cmd = UTIL_STAT_CMD;
+	header->ipaddr = CFG.host_addr.addr;
+	header->port = 1234;
+	int rxMbps = 0;
+	int txMbps = 0;
+	//printf("send stat: %d, %d\n", util_per_sec->rxbytes, util_per_sec->txbytes);
+	if (!list_empty(util_list)){
+		struct util *u = list_tail(util_list, struct util, link);
+		printf("send stat: %d, %d\n", u->rxbytes, u->txbytes);
+		rxMbps = u->rxbytes * 8 / 1e6;
+		txMbps = u->txbytes * 8 / 1e6;
+	}
+	header->rxMbps = rxMbps;
+	header->txMbps = txMbps;
+	header->cpu_util_len = 1;
+	header->cpu_util = 100;
+
+	while (ctrl_conn->tx_sent < sizeof(CTRL_MSG_HEADER)){
+		ret = ixev_send(&ctrl_conn->ctx, &ctrl_conn->data_send[ctrl_conn->tx_sent],
+				sizeof(CTRL_MSG_HEADER) - ctrl_conn->tx_sent);
+		if (ret == -EAGAIN){
+			return -1;
+		}
+		if (ret < 0) {
+			return -2;
+		}
+		ctrl_conn->tx_sent += ret;
+	}
+	assert(ctrl_conn->tx_sent == sizeof(CTRL_MSG_HEADER));
+	ctrl_conn->tx_pending = true;
+	ctrl_conn->tx_sent = 0;
+}
+
+
 void *pp_main(void *arg)
 {
 	int ret;
@@ -723,8 +800,6 @@ void *pp_main(void *arg)
 	
 	ixev_ctx_init(&ctrl_conn->ctx);
 	
-	ctrl_conn->nvme_fg_handle = 0; //set to this for now
-
 	flags = fcntl(STDIN_FILENO, F_GETFL, 0);
 	fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 
@@ -733,16 +808,13 @@ void *pp_main(void *arg)
 	ctrl_ip_tuple.src_port = 2345;
 	printf("Dial controller...\n");
 	ixev_dial(&ctrl_conn->ctx, &ctrl_ip_tuple);
-	// TODO SEND??
 
 	while (1) {
 		ixev_wait();
 		unsigned long now = rdtsc();
 		unsigned long time_elapsed = (now-start_time)/cycles_per_us;
 		if (time_elapsed >= CONTROLLER_STAT_SEC_INTERVAL * 1000000) {
-			//printf("send stat: %d, %d\n", util_per_sec->rxbytes, util_per_sec->txbytes);
-            		struct util *u = list_tail(util_list, struct util, link);
-			printf("send stat: %d, %d\n", u->rxbytes, u->txbytes);
+			send_ctrl_stats();
 		}
 	}
 
@@ -837,17 +909,17 @@ int reflex_server_main(int argc, char *argv[])
 	printf("Started ReFlex server...\n");
 
 	/******start monitoring***/
-    util_per_sec = (struct util*) malloc(sizeof(struct util));
-    util_list = (struct list_head*) malloc(sizeof(struct list_head));
+	util_per_sec = (struct util*) malloc(sizeof(struct util));
+	util_list = (struct list_head*) malloc(sizeof(struct list_head));
 
-    list_head_init(util_list);
-    util_per_sec->num_req = 0;
-    util_per_sec->rxbytes = 0;
-    util_per_sec->txbytes = 0;
-    start_time = rdtsc();
+	list_head_init(util_list);
+	util_per_sec->num_req = 0;
+	util_per_sec->rxbytes = 0;
+	util_per_sec->txbytes = 0;
+	start_time = rdtsc();
 
-    if (signal(SIGINT, sig_handler) == SIG_ERR)
-        printf("\ncan't catch SIGINT\n");
+	if (signal(SIGINT, sig_handler) == SIG_ERR)
+		printf("\ncan't catch SIGINT\n");
 	/************************/
 
 	pp_main(NULL);

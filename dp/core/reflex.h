@@ -68,6 +68,17 @@ typedef struct __attribute__ ((__packed__)) {
   unsigned int lba_count;
 } binary_header_blk_t;
 
+typedef struct __attribute__ ((__packed__)) {
+  uint32_t msglen;
+  uint64_t ticket;
+  uint16_t util_stat_cmd;
+  uint32_t ipaddr;
+  uint32_t port;
+  uint32_t rxMbps;
+  uint32_t txMbps;
+  uint32_t cpu_util_len;
+  uint32_t cpu_util; //NOTE: currently assuming one core only
+} ctrl_msg_header_t;
 
 void *pp_main(void *arg);
 
