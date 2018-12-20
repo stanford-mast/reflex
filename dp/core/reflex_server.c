@@ -710,11 +710,11 @@ void send_ctrl_stats(void) {
 	char *ip = NULL;
 
 	header = (CTRL_MSG_HEADER *) &ctrl_conn->data_send[0];
-        header->msglen = sizeof(CTRL_MSG_HEADER); //note: adjust this if move to multi-core cpu util
-	header->ticket = rdtsc();
-	header->util_stat_cmd = UTIL_STAT_CMD;
-	header->ipaddr = CFG.host_addr.addr;
-	header->port = 1234;
+        header->msglen = htonl(sizeof(CTRL_MSG_HEADER)); //note: adjust this if move to multi-core cpu util
+	header->ticket = htonl(rdtsc());
+	header->util_stat_cmd = htons(UTIL_STAT_CMD);
+	header->ipaddr = htonl(CFG.host_addr.addr);
+	header->port = htonl(1234);
 	int rxMbps = 0;
 	int txMbps = 0;
 	//printf("send stat: %d, %d\n", util_per_sec->rxbytes, util_per_sec->txbytes);
@@ -724,10 +724,10 @@ void send_ctrl_stats(void) {
 		rxMbps = u->rxbytes * 8 / 1e6;
 		txMbps = u->txbytes * 8 / 1e6;
 	}
-	header->rxMbps = rxMbps;
-	header->txMbps = txMbps;
-	header->cpu_util_len = 1;
-	header->cpu_util = 100;
+	header->rxMbps = htonl(rxMbps);
+	header->txMbps = htonl(txMbps);
+	header->cpu_util_len = htonl(1);
+	header->cpu_util = htonl(100);
 
 	while (ctrl_conn->tx_sent < sizeof(CTRL_MSG_HEADER)){
 		ret = ixev_send(&ctrl_conn->ctx, &ctrl_conn->data_send[ctrl_conn->tx_sent],
@@ -804,8 +804,8 @@ void *pp_main(void *arg)
 	fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 
 	ctrl_ip_tuple.dst_ip = 167849906; // 10.1.47.178 -- this is hardcoded for now!
-	ctrl_ip_tuple.dst_port = 1235;
-	ctrl_ip_tuple.src_port = 2345;
+	ctrl_ip_tuple.dst_port = 2345;
+	ctrl_ip_tuple.src_port = 1234;
 	printf("Dial controller...\n");
 	ixev_dial(&ctrl_conn->ctx, &ctrl_ip_tuple);
 
